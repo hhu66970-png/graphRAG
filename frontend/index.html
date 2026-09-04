@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中药学 GraphRAG - 知识图谱问答系统</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+
+        #header {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            padding: 20px 40px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        #header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #fff;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            margin-bottom: 5px;
+        }
+
+        #header .subtitle {
+            font-size: 14px;
+            color: #b0b0b0;
+            font-weight: 400;
+        }
+
+        #container {
+            display: flex;
+            height: calc(100vh - 85px);
+        }
+
+        #sidebar {
+            width: 350px;
+            background: rgba(26, 26, 46, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 25px;
+            overflow-y: auto;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
+        }
+
+        #sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #sidebar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        #sidebar::-webkit-scrollbar-thumb {
+            background: rgba(79, 195, 247, 0.3);
+            border-radius: 3px;
+        }
+
+        .section {
+            margin-bottom: 25px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 18px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .section:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(79, 195, 247, 0.3);
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #4fc3f7;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .retrieval-selector {
+            margin-bottom: 10px;
+        }
+
+        .retrieval-selector label {
+            display: block;
+            color: #b0b0b0;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        .retrieval-selector select {
+            width: 100%;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .retrieval-selector select:focus {
+            outline: none;
+            border-color: #4fc3f7;
+        }
+
+        .retrieval-selector option {
+            background: #1a1a2e;
+            color: #fff;
+        }
+
+        #question-input {
+            width: 100%;
+            min-height: 80px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            color: #fff;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+
+        #question-input:focus {
+            outline: none;
+            border-color: #4fc3f7;
+        }
+
+        #ask-button {
+            width: 100%;
+            padding: 10px;
+            background: #4fc3f7;
+            border: none;
+            border-radius: 5px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        #ask-button:hover {
+            background: #3ba3d0;
+        }
+
+        #ask-button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        #answer-box {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+            color: #e0e0e0;
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        #answer-box.visible {
+            display: block;
+        }
+
+        .answer-label {
+            color: #4fc3f7;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #4fc3f7;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #search-box {
+            width: 100%;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        #search-box:focus {
+            outline: none;
+            border-color: #4fc3f7;
+        }
+
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+        }
+
+        .stat-label {
+            color: #b0b0b0;
+            font-size: 13px;
+        }
+
+        .stat-value {
+            color: #4fc3f7;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .legend {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .legend-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateX(5px);
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .legend-label {
+            font-size: 13px;
+            color: #e0e0e0;
+        }
+
+        .legend-count {
+            margin-left: auto;
+            font-size: 12px;
+            color: #888;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        #graph-container {
+            flex: 1;
+            position: relative;
+            background: rgba(26, 26, 46, 0.5);
+            overflow: hidden;
+        }
+
+        #status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 20px;
+            font-size: 12px;
+            color: #4fc3f7;
+            z-index: 10;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+            color: #4fc3f7;
+            display: none;
+            z-index: 5;
+        }
+
+        #empty-hint {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            font-size: 16px;
+            line-height: 1.7;
+            color: rgba(176, 190, 197, 0.9);
+            z-index: 4;
+            pointer-events: none;
+            padding: 0 24px;
+        }
+
+        #details-panel {
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            max-width: 300px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+            z-index: 10;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #graph {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        #graph:active {
+            cursor: grabbing;
+        }
+
+        .zoom-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 100;
+        }
+
+        .zoom-btn {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .zoom-btn:hover {
+            background: rgba(79, 195, 247, 0.3);
+            border-color: #4fc3f7;
+            transform: scale(1.1);
+        }
+
+        .node {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+            filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.5));
+            transition: all 0.2s ease;
+        }
+
+        .node text {
+            font-size: 11px;
+            fill: #fff;
+            text-anchor: middle;
+            pointer-events: none;
+            text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+        }
+
+        .node:hover circle {
+            stroke: #4fc3f7;
+            stroke-width: 3px;
+        }
+
+        .node.highlighted circle {
+            stroke: #ffd700;
+            stroke-width: 4px;
+            filter: drop-shadow(0 0 8px #ffd700);
+        }
+
+        .link {
+            stroke: rgba(255, 255, 255, 0.4);
+            stroke-width: 1.5px;
+            fill: none;
+            transition: all 0.2s ease;
+        }
+
+        .link.highlighted {
+            stroke: #ffd700;
+            stroke-width: 3px;
+        }
+
+        .link-label {
+            font-size: 9px;
+            fill: #999;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>🌿 中药学 GraphRAG</h1>
+        <div class="subtitle">知识图谱问答系统 · 默认仅展示问答相关子图</div>
+    </div>
+
+    <div id="container">
+        <div id="sidebar">
+            <div class="section">
+                <div class="section-title">GraphRAG 问答</div>
+                <div class="retrieval-selector">
+                    <label for="retrieval-method">检索方式:</label>
+                    <select id="retrieval-method">
+                        <option value="keyword_graph" selected>中文混合向量+图谱（推荐）</option>
+                        <option value="vector">向量检索 (VectorRetriever)</option>
+                        <option value="vector_cypher">向量+图遍历 (VectorCypherRetriever)</option>
+                        <option value="hybrid">混合检索 (HybridRetriever)</option>
+                        <option value="hybrid_cypher">混合+图遍历 (HybridCypherRetriever)</option>
+                    </select>
+                </div>
+                <textarea id="question-input" placeholder="例如：影响中药贮藏变异的外界因素有哪些？"></textarea>
+                <button id="ask-button">提问</button>
+                <div id="answer-box"></div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">搜索</div>
+                <input type="text" id="search-box" placeholder="搜索实体...">
+            </div>
+
+            <div class="section">
+                <div class="section-title">统计信息</div>
+                <div id="stats">
+                    <div class="stat">
+                        <span class="stat-label">实体数量</span>
+                        <span class="stat-value" id="node-count">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">关系数量</span>
+                        <span class="stat-value" id="edge-count">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">实体类型</div>
+                <div class="legend" id="legend"></div>
+                <div style="margin-top: 8px; font-size: 12px; color: #90a4ae;">启动显示全库统计；提问后切换为当前子图类型</div>
+            </div>
+        </div>
+
+        <div id="graph-container">
+            <div id="status">连接中...</div>
+            <div id="loading">加载中...</div>
+            <div id="empty-hint">暂不加载全图，避免卡顿<br>请在左侧提问，这里会显示相关子图</div>
+            <div id="details-panel"></div>
+            <div class="zoom-controls">
+                <button class="zoom-btn" id="zoom-in" title="放大">+</button>
+                <button class="zoom-btn" id="zoom-reset" title="重置">⊙</button>
+                <button class="zoom-btn" id="zoom-out" title="缩小">−</button>
+            </div>
+            <svg id="graph"></svg>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const MAX_SUBGRAPH_NODES = 80;
+
+        let graphData = { nodes: [], edges: [] };
+        let svg, g, simulation, link, node, zoom;
+
+        // Color scheme for different entity types
+        const colorScheme = {
+            '中药': '#2e7d32',
+            '功效': '#66bb6a',
+            '主治': '#ef6c00',
+            '性味': '#8d6e63',
+            '归经': '#5e35b1',
+            '用法用量': '#00838f',
+            '禁忌': '#c62828',
+            '配伍': '#1565c0',
+            '药材来源': '#6d4c41',
+            '炮制': '#ad8b00',
+            '化学成分': '#455a64',
+            '方剂': '#7b1fa2',
+            '典籍': '#0277bd',
+            '人物': '#d81b60',
+            '概念': '#78909c',
+            'default': '#95a5a6'
+        };
+
+        function getNodeColor(type) {
+            return colorScheme[type] || colorScheme['default'];
+        }
+
+        function setEmptyHintVisible(visible) {
+            const hint = document.getElementById('empty-hint');
+            if (hint) hint.style.display = visible ? 'block' : 'none';
+        }
+
+        function cloneGraphPayload(data) {
+            const nodes = (data.nodes || []).map(n => ({
+                id: n.id,
+                label: n.label || n.name || 'unknown',
+                type: n.type || '概念'
+            }));
+            const nodeIds = new Set(nodes.map(n => n.id));
+            const edges = (data.edges || [])
+                .map(e => ({
+                    source: typeof e.source === 'object' ? e.source.id : e.source,
+                    target: typeof e.target === 'object' ? e.target.id : e.target,
+                    type: e.type || '相关'
+                }))
+                .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+            return { nodes, edges };
+        }
+
+        function limitGraph(data) {
+            if (data.nodes.length <= MAX_SUBGRAPH_NODES) return data;
+            const keep = new Set(data.nodes.slice(0, MAX_SUBGRAPH_NODES).map(n => n.id));
+            return {
+                nodes: data.nodes.filter(n => keep.has(n.id)),
+                edges: data.edges.filter(e => keep.has(e.source) && keep.has(e.target))
+            };
+        }
+
+        // Initialize D3 force simulation
+        function initGraph() {
+            svg = d3.select('#graph');
+            const container = document.getElementById('graph-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            svg.attr('width', width).attr('height', height);
+
+            svg.selectAll('*').remove();
+            svg.append('defs').append('marker')
+                .attr('id', 'arrowhead')
+                .attr('viewBox', '-0 -5 10 10')
+                .attr('refX', 18)
+                .attr('refY', 0)
+                .attr('orient', 'auto')
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .append('path')
+                .attr('d', 'M 0,-5 L 10,0 L 0,5')
+                .attr('fill', '#90a4ae');
+
+            // Create zoom behavior
+            zoom = d3.zoom()
+                .scaleExtent([0.1, 10])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+
+            // Create main group for zooming/panning
+            g = svg.append('g');
+
+            // Initialize force simulation
+            simulation = d3.forceSimulation()
+                .force('link', d3.forceLink().id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(30));
+
+            // Zoom controls
+            document.getElementById('zoom-in').addEventListener('click', () => {
+                svg.transition().call(zoom.scaleBy, 1.3);
+            });
+
+            document.getElementById('zoom-out').addEventListener('click', () => {
+                svg.transition().call(zoom.scaleBy, 0.7);
+            });
+
+            document.getElementById('zoom-reset').addEventListener('click', () => {
+                svg.transition().call(zoom.transform, d3.zoomIdentity);
+            });
+        }
+
+        function updateGraph(data) {
+            const prepared = limitGraph(cloneGraphPayload(data || { nodes: [], edges: [] }));
+            graphData = prepared;
+            setEmptyHintVisible(prepared.nodes.length === 0);
+
+            // Update links
+            link = g.selectAll('.link')
+                .data(prepared.edges, d => `${d.source}-${d.target}-${d.type}`)
+                .join('path')
+                .attr('class', 'link')
+                .attr('marker-end', 'url(#arrowhead)');
+
+            // Update link labels
+            const linkLabel = g.selectAll('.link-label')
+                .data(prepared.edges, d => `${d.source}-${d.target}-${d.type}`)
+                .join('text')
+                .attr('class', 'link-label')
+                .text(d => d.type);
+
+            // Update nodes
+            const nodeGroup = g.selectAll('.node')
+                .data(prepared.nodes, d => d.id)
+                .join('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragStarted)
+                    .on('drag', dragged)
+                    .on('end', dragEnded));
+
+            nodeGroup.selectAll('*').remove();
+
+            nodeGroup.append('circle')
+                .attr('r', 8)
+                .attr('fill', d => getNodeColor(d.type));
+
+            nodeGroup.append('text')
+                .attr('dy', 20)
+                .text(d => d.label);
+
+            node = nodeGroup;
+
+            // Update simulation
+            simulation.nodes(prepared.nodes);
+            simulation.force('link').links(prepared.edges);
+            simulation.alpha(1).restart();
+
+            simulation.on('tick', () => {
+                link.attr('d', d => {
+                    const dx = d.target.x - d.source.x;
+                    const dy = d.target.y - d.source.y;
+                    const dr = Math.sqrt(dx * dx + dy * dy) || 1;
+                    return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+                });
+
+                linkLabel
+                    .attr('x', d => (d.source.x + d.target.x) / 2)
+                    .attr('y', d => (d.source.y + d.target.y) / 2);
+
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+            updateLegend(prepared.nodes);
+        }
+
+        function updateLegend(nodes) {
+            const typeCounts = {};
+            nodes.forEach(node => {
+                typeCounts[node.type] = (typeCounts[node.type] || 0) + 1;
+            });
+
+            const legend = document.getElementById('legend');
+            legend.innerHTML = '';
+
+            Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).forEach(([type, count]) => {
+                const item = document.createElement('div');
+                item.className = 'legend-item';
+                item.innerHTML = `
+                    <div class="legend-color" style="background: ${getNodeColor(type)}"></div>
+                    <div class="legend-label">${type}</div>
+                    <div class="legend-count">${count}</div>
+                `;
+                legend.appendChild(item);
+            });
+        }
+
+        function updateLegendFromStats(nodesByType) {
+            const legend = document.getElementById('legend');
+            legend.innerHTML = '';
+            Object.entries(nodesByType || {})
+                .sort((a, b) => b[1] - a[1])
+                .forEach(([type, count]) => {
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `
+                        <div class="legend-color" style="background: ${getNodeColor(type)}"></div>
+                        <div class="legend-label">${type}</div>
+                        <div class="legend-count">${count}</div>
+                    `;
+                    legend.appendChild(item);
+                });
+        }
+
+        function dragStarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragEnded(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        async function checkHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                document.getElementById('status').textContent = data.status === 'ok' ? '✓ 已连接' : '✗ 连接失败';
+                document.getElementById('status').style.color = data.status === 'ok' ? '#4fc3f7' : '#f44336';
+            } catch (error) {
+                document.getElementById('status').textContent = '✗ 无法连接';
+                document.getElementById('status').style.color = '#f44336';
+            }
+        }
+
+        async function loadStats() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loading').textContent = '加载图谱统计...';
+            try {
+                const response = await fetch(`${API_BASE}/stats`);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || '统计接口失败');
+
+                document.getElementById('node-count').textContent = data.total_nodes ?? '-';
+                document.getElementById('edge-count').textContent = data.total_relationships ?? '-';
+                updateLegendFromStats(data.nodes_by_type);
+                setEmptyHintVisible(true);
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                document.getElementById('loading').textContent = '统计加载失败';
+                document.getElementById('node-count').textContent = '-';
+                document.getElementById('edge-count').textContent = '-';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // GraphRAG question answering
+        document.getElementById('ask-button').addEventListener('click', async () => {
+            const question = document.getElementById('question-input').value.trim();
+            const method = document.getElementById('retrieval-method').value;
+
+            if (!question) return;
+
+            const askButton = document.getElementById('ask-button');
+            const answerBox = document.getElementById('answer-box');
+
+            // Disable button and show loading
+            askButton.disabled = true;
+            askButton.innerHTML = '<span class="loading-spinner"></span> 思考中...';
+            answerBox.className = 'visible';
+            answerBox.innerHTML = '<div class="loading-spinner"></div> 正在检索知识图谱...';
+
+            try {
+                const response = await fetch(`${API_BASE}/graphrag`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: question,
+                        method: method
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Display answer
+                    const methodLabel = {
+                        'keyword_graph': 'BM25+中文向量+受限图谱（推荐）',
+                        'vector': '向量检索',
+                        'vector_cypher': '向量+图遍历',
+                        'hybrid': '混合检索',
+                        'hybrid_cypher': '混合+图遍历'
+                    }[data.method] || data.method;
+
+                    const subgraph = data.subgraph || { nodes: [], edges: [] };
+                    const nodeCount = subgraph.nodes ? subgraph.nodes.length : 0;
+                    const edgeCount = subgraph.edges ? subgraph.edges.length : 0;
+
+                    answerBox.innerHTML = `
+                        <div class="answer-label">回答 (${methodLabel}):</div>
+                        <div>${data.answer}</div>
+                        ${data.sources ? `<div style="margin-top: 10px; color: #b0bec5;">命中教材页：${data.sources.map(s => s.page_start === s.page_end ? s.page_start : `${s.page_start}-${s.page_end}`).join('、')}</div>` : ''}
+                        <div style="margin-top: 10px; color: #4fc3f7;">右侧展示相关子图：${nodeCount} 个节点，${edgeCount} 条关系</div>
+                    `;
+
+                    // Render only the answer subgraph (never the full graph)
+                    if (nodeCount > 0) {
+                        updateGraph(subgraph);
+                    } else {
+                        updateGraph({ nodes: [], edges: [] });
+                    }
+                } else {
+                    answerBox.innerHTML = `<div style="color: #f44336;">错误: ${data.error || '请求失败'}</div>`;
+                }
+            } catch (error) {
+                console.error('Error asking question:', error);
+                answerBox.innerHTML = `<div style="color: #f44336;">错误: ${error.message}</div>`;
+            } finally {
+                askButton.disabled = false;
+                askButton.textContent = '提问';
+            }
+        });
+
+        // Search: show matched entities as a small graph instead of scanning a full canvas
+        let searchTimer = null;
+        document.getElementById('search-box').addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            clearTimeout(searchTimer);
+            if (query.length < 2) return;
+
+            searchTimer = setTimeout(async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
+                    const data = await response.json();
+                    if (!data.results || data.results.length === 0) return;
+                    updateGraph({
+                        nodes: data.results.map(r => ({
+                            id: r.id,
+                            label: r.name,
+                            type: r.type
+                        })),
+                        edges: []
+                    });
+                } catch (error) {
+                    console.error('Error searching:', error);
+                }
+            }, 250);
+        });
+
+        // Initialize: stats only, no full-graph download
+        initGraph();
+        checkHealth();
+        loadStats();
+        setInterval(checkHealth, 10000);
+    </script>
+</body>
+</html>
