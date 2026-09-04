@@ -35,16 +35,38 @@ def neo4j_connection_test(neo4j_driver):
 
 @pytest.fixture
 def clean_database(neo4j_driver):
-    """Clean database before each test"""
+    """Provide an empty database for tests that need one.
+
+    安全护栏（SKILL §3.7「禁止默认 DETACH DELETE 全库」）：
+    本 fixture 会清空整个数据库。若目标库里已有数据，默认**跳过测试**而不是删除——
+    否则任何人执行一次 `pytest` 都会毁掉现网图谱。
+
+    需要在真实非空库上跑破坏性测试时，显式设置：
+        ALLOW_DESTRUCTIVE_TESTS=true
+    更推荐的做法是把 NEO4J_URL 指向一个专用的空实例。
+    """
     try:
         neo4j_driver.verify_connectivity()
     except Exception as exc:
         pytest.skip(f"Neo4j not available: {exc}")
-    with neo4j_driver.session() as session:
+
+    database = os.getenv("NEO4J_DB") or None
+    with neo4j_driver.session(database=database) as session:
+        existing = session.run("MATCH (n) RETURN count(n) AS count").single()["count"]
+
+    allow_destructive = (os.getenv("ALLOW_DESTRUCTIVE_TESTS") or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if existing and not allow_destructive:
+        pytest.skip(
+            f"目标库非空（{existing} 个节点），已跳过以避免清空现网数据。"
+            "请将 NEO4J_URL 指向空实例，或设置 ALLOW_DESTRUCTIVE_TESTS=true。"
+        )
+
+    with neo4j_driver.session(database=database) as session:
         session.run("MATCH (n) DETACH DELETE n")
     yield
-    # Cleanup after test
-    with neo4j_driver.session() as session:
+    with neo4j_driver.session(database=database) as session:
         session.run("MATCH (n) DETACH DELETE n")
 
 

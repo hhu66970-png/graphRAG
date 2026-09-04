@@ -1,0 +1,166 @@
+# 《中药学》受控本体 —— SKILL §3.4 唯一事实源
+# 规则：
+#   - 实体类型与关系 ID 只能从本文件读取，LLM 不得自由创建正式标签或关系类型。
+#   - 每个关系必须定义 domain/range、中文展示名、是否高风险、允许的限定符。
+#   - 未知类型或非法起止类型必须记录并拒绝，不得统一降级为「概念」。
+# 任何改动都属于契约变更，必须升 schema_version 并写 ADR（SKILL §15）。
+
+schema_version: "kg-ontology-1.0.0"
+
+entity_types:
+  HERB:            {display: 中药,     description: 单味中药或饮片}
+  CATEGORY:        {display: 药类,     description: 功效分类，如解表药、清热解毒药}
+  EFFICACY:        {display: 功效,     description: 药物作用，如补气、生津}
+  INDICATION:      {display: 主治,     description: 所治病证，如风寒感冒}
+  NATURE_FLAVOR:   {display: 性味,     description: 四气五味，如甘微苦微温}
+  MERIDIAN:        {display: 归经,     description: 归属经络脏腑，如归脾经}
+  CONTRAINDICATION: {display: 禁忌,    description: 禁忌与慎用情形}
+  SOURCE:          {display: 药材来源, description: 基原、产地、药用部位}
+  PROCESSING:      {display: 炮制,     description: 炮制方法}
+  COMPOUND:        {display: 化学成分, description: 化学成分}
+  FORMULA:         {display: 方剂,     description: 方剂名}
+  CLASSIC:         {display: 典籍,     description: 本草典籍}
+  PERSON:          {display: 人物,     description: 医家人物}
+  CONCEPT:         {display: 概念,     description: 理论概念；仅用于确实无法归入上述类型者}
+
+# 值对象：不建独立实体身份，作为 Assertion.object_value 保存（设计文档 §2.1.2-C）
+value_object_types:
+  DOSAGE:
+    display: 用法用量
+    fields: [value_min, value_max, unit, route, condition, raw]
+
+predicates:
+  HAS_EFFICACY:
+    display: 具有功效
+    domain: [HERB, CATEGORY]
+    range:  [EFFICACY]
+    high_risk: false
+    qualifiers: [polarity_note]
+  TREATS:
+    display: 主治
+    domain: [HERB, CATEGORY, FORMULA]
+    range:  [INDICATION]
+    high_risk: false
+    qualifiers: [polarity_note]
+  HAS_NATURE_FLAVOR:
+    display: 性味为
+    domain: [HERB]
+    range:  [NATURE_FLAVOR]
+    high_risk: false
+    qualifiers: []
+  ENTERS_MERIDIAN:
+    display: 归经为
+    domain: [HERB]
+    range:  [MERIDIAN]
+    high_risk: false
+    qualifiers: []
+  HAS_DOSAGE:
+    display: 用量为
+    domain: [HERB]
+    range:  [DOSAGE]          # 值对象
+    high_risk: true
+    qualifiers: [route, condition, population]
+  CONTRAINDICATED_IN:
+    display: 禁忌
+    domain: [HERB, CATEGORY]
+    range:  [CONTRAINDICATION, INDICATION]
+    high_risk: true
+    qualifiers: [population, severity]
+  INCOMPATIBLE_WITH:
+    display: 配伍禁忌
+    domain: [HERB]
+    range:  [HERB]
+    high_risk: true
+    qualifiers: [rule_name]
+  COMBINED_WITH:
+    display: 配伍
+    domain: [HERB]
+    range:  [HERB]
+    high_risk: false
+    qualifiers: [purpose]
+  DERIVED_FROM:
+    display: 来源于
+    domain: [HERB]
+    range:  [SOURCE]
+    high_risk: false
+    qualifiers: [part]
+  PROCESSED_AS:
+    display: 炮制为
+    domain: [HERB]
+    range:  [PROCESSING]
+    high_risk: false
+    qualifiers: []
+  CONTAINS_COMPOUND:
+    display: 含有
+    domain: [HERB]
+    range:  [COMPOUND]
+    high_risk: false
+    qualifiers: []
+  RECORDED_IN:
+    display: 记载于
+    domain: [HERB, FORMULA, CONCEPT]
+    range:  [CLASSIC]
+    high_risk: false
+    qualifiers: []
+  BELONGS_TO_CATEGORY:
+    display: 属于
+    domain: [HERB]
+    range:  [CATEGORY]
+    high_risk: false
+    qualifiers: []
+
+# 旧图关系名 → 稳定谓词 ID。仅用于迁移与兼容读取（设计文档 §2.2.2-B）。
+# 新抽取不得依赖本表：LLM 只能输出上面的稳定 ID。
+legacy_relation_aliases:
+  具有功效: HAS_EFFICACY
+  功效为: HAS_EFFICACY
+  功效: HAS_EFFICACY
+  作用: HAS_EFFICACY
+  主治: TREATS
+  治疗: TREATS
+  用于: TREATS
+  适应证: TREATS
+  适应症: TREATS
+  性味为: HAS_NATURE_FLAVOR
+  性味: HAS_NATURE_FLAVOR
+  归经为: ENTERS_MERIDIAN
+  归经: ENTERS_MERIDIAN
+  用量为: HAS_DOSAGE
+  用法用量: HAS_DOSAGE
+  用量: HAS_DOSAGE
+  禁忌: CONTRAINDICATED_IN
+  慎用: CONTRAINDICATED_IN
+  忌用: CONTRAINDICATED_IN
+  注意事项: CONTRAINDICATED_IN
+  配伍: COMBINED_WITH
+  相须: COMBINED_WITH
+  相使: COMBINED_WITH
+  相畏: INCOMPATIBLE_WITH
+  相恶: INCOMPATIBLE_WITH
+  相反: INCOMPATIBLE_WITH
+  来源于: DERIVED_FROM
+  来源: DERIVED_FROM
+  炮制为: PROCESSED_AS
+  炮制: PROCESSED_AS
+  含有: CONTAINS_COMPOUND
+  记载于: RECORDED_IN
+  属于: BELONGS_TO_CATEGORY
+
+legacy_entity_aliases:
+  中药: HERB
+  药物: HERB
+  药材: HERB
+  中药材: HERB
+  功效: EFFICACY
+  主治: INDICATION
+  性味: NATURE_FLAVOR
+  归经: MERIDIAN
+  用法用量: DOSAGE
+  禁忌: CONTRAINDICATION
+  药材来源: SOURCE
+  炮制: PROCESSING
+  化学成分: COMPOUND
+  方剂: FORMULA
+  典籍: CLASSIC
+  人物: PERSON
+  概念: CONCEPT

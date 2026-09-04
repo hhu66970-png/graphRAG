@@ -336,6 +336,95 @@ def _keyword_graph_search(question, top_k=RETRIEVAL_TOP_K):
     return ranked_chunks, {"nodes": list(nodes.values()), "edges": edges}, triples
 
 
+def _answer_with_kg_v2(question):
+    """Answer from the v2 evidence graph's typed serving projection.
+
+    这是一条**演示用**的读取路径：实体链接用最长匹配、只处理单药属性聚合，
+    完整的意图路由（attr/reverse/intersect/compare）与结构化注入属 retrieval /
+    structuring 层的工作（SKILL §5.6 / §5.7），不在此实现。
+
+    API 层在这里只做编排，全部图查询委托给 storage.serving_read（SKILL §5.9）。
+    """
+    from graphragexpr.domain.ontology import load_ontology
+    from graphragexpr.storage import serving_read
+    from graphragexpr.storage.neo4j_store import Neo4jStore
+
+    store = Neo4jStore()
+    try:
+        run_id = serving_read.active_run(store)
+        if not run_id:
+            raise RuntimeError("没有 ACTIVE 的 IngestRun，请先运行 scripts/build_kg_v2.py")
+
+        ontology = load_ontology()
+        linked = serving_read.link_entities_in_text(store, question, run_id=run_id)
+        herb = next((e for e in linked if e["entity_type"] == "HERB"), None)
+
+        if herb is None:
+            constraint = next(iter(linked), None)
+            if constraint is None:
+                return (
+                    "问题中未能链接到知识图谱中的中药或功效实体，无法基于图谱作答。",
+                    {"nodes": [], "edges": []}, [],
+                )
+            # 反向检索：哪些药具有该功效/主治
+            rows = serving_read.find_herbs_by_effect(
+                store, constraint["name"], run_id=run_id
+            )
+            if not rows:
+                return (
+                    f"知识图谱中没有与「{constraint['name']}」关联的中药记录。",
+                    {"nodes": [], "edges": []}, [],
+                )
+            listed = "、".join(f"{r['herb']}（第{r['page_start']}页）" for r in rows[:15])
+            return (
+                f"教材中与「{constraint['name']}」相关的中药包括：{listed}。\n"
+                "以上结果直接来自知识图谱的类型化关系，每味药后为教材页码。",
+                {"nodes": [], "edges": []},
+                [{"page_start": r["page_start"], "page_end": r["page_start"],
+                  "score": float(r["score"] or 0), "matched_terms": [r["predicate"]]}
+                 for r in rows[:15]],
+            )
+
+        card = serving_read.get_herb_card(store, ontology, herb["name"], run_id=run_id)
+        if card is None or card.is_empty():
+            return (
+                f"知识图谱中没有「{herb['name']}」的属性记录。",
+                {"nodes": [], "edges": []}, [],
+            )
+
+        evidence_ids = [eid for slot in card.slots for eid in slot.evidence_ids][:12]
+        evidence = serving_read.load_evidence(store, evidence_ids)
+        context, sources = serving_read.card_to_context(card, evidence)
+    finally:
+        store.close()
+
+    prompt = f"""请严格依据下面从《中药学》知识图谱中检索到的结构化事实回答问题。
+
+规则：
+1. 只使用给定事实，不得补充图谱之外的知识；
+2. 每条关键结论后标注其对应的 PDF 页码；
+3. 涉及剂量、毒性、禁忌时，提醒以教材原文和专业人员意见为准；
+4. 给定事实不足以回答时，如实说明缺什么。
+
+# 问题
+{question}
+
+# 知识图谱事实（含出处页码）
+{context}
+"""
+    client = OpenAI(api_key=os.getenv("LLM_TOKEN"), base_url=os.getenv("LLM_ENDPOINT") or None)
+    response = client.chat.completions.create(
+        model=os.getenv("LLM_MODEL", "deepseek-chat"),
+        messages=[
+            {"role": "system", "content": "你是严谨的中药学教材问答助手。"},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0,
+    )
+    answer = response.choices[0].message.content or "模型没有返回答案"
+    return answer, card.subgraph, sources
+
+
 def _answer_with_keyword_graph(question):
     chunks, subgraph, triples = _keyword_graph_search(question)
     if not chunks:
@@ -646,6 +735,13 @@ def graphrag_query():
         return jsonify({"error": "Question is required"}), 400
 
     try:
+        if method == 'kg_v2':
+            answer, subgraph, sources = _answer_with_kg_v2(question)
+            return jsonify({
+                "answer": answer, "method": method,
+                "subgraph": subgraph, "sources": sources,
+            }), 200
+
         if method == 'keyword_graph':
             answer, subgraph, sources = _answer_with_keyword_graph(question)
             return jsonify({
