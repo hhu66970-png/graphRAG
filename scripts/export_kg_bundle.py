@@ -29,7 +29,39 @@ def _driver():
     return GraphDatabase.driver(url, auth=(user, password)), os.getenv("NEO4J_DB") or None
 
 
-def export_bundle(output: Path) -> Path:
+# 只保留 ACTIVE run 的 Assertion/Entity/IngestRun；Document、Chunk 与旧图实体
+# 属于共享数据，始终导出（旧图是前端四种对照检索模式的数据来源）。
+_ACTIVE_RUN = "MATCH (r:IngestRun {status:'ACTIVE'}) RETURN r.run_id AS run_id LIMIT 1"
+
+_NODES_ALL = """
+MATCH (n)
+RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props
+"""
+
+_NODES_ACTIVE_ONLY = """
+MATCH (n)
+WHERE NOT (n:Assertion OR n:Entity OR n:IngestRun) OR n.run_id = $run
+RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props
+"""
+
+_RELS_ALL = """
+MATCH (a)-[r]->(b)
+RETURN elementId(a) AS source_id, elementId(b) AS target_id,
+       type(r) AS type, properties(r) AS props
+"""
+
+# 关系两端都必须在导出的节点集合内，否则导入时会因找不到端点被静默丢弃
+_RELS_ACTIVE_ONLY = """
+MATCH (a)-[r]->(b)
+WHERE (NOT (a:Assertion OR a:Entity OR a:IngestRun) OR a.run_id = $run)
+  AND (NOT (b:Assertion OR b:Entity OR b:IngestRun) OR b.run_id = $run)
+  AND (r.active_run_id IS NULL OR r.active_run_id = $run)
+RETURN elementId(a) AS source_id, elementId(b) AS target_id,
+       type(r) AS type, properties(r) AS props
+"""
+
+
+def export_bundle(output: Path, *, active_only: bool = False) -> Path:
     driver, database = _driver()
     output = output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -41,13 +73,19 @@ def export_bundle(output: Path) -> Path:
         with driver.session(database=database) as session, zipfile.ZipFile(
             output, "w", compression=zipfile.ZIP_DEFLATED
         ) as archive:
+            run_id = None
+            if active_only:
+                rows = list(session.run(_ACTIVE_RUN))
+                if not rows:
+                    raise RuntimeError("没有 ACTIVE 的 IngestRun，无法按 --active-only 导出")
+                run_id = rows[0]["run_id"]
+                print(f"only exporting ACTIVE run: {run_id}")
+
             node_count = 0
             with archive.open("nodes.jsonl", "w") as handle:
                 for record in session.run(
-                    """
-                    MATCH (n)
-                    RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props
-                    """
+                    _NODES_ACTIVE_ONLY if active_only else _NODES_ALL,
+                    **({"run": run_id} if active_only else {}),
                 ):
                     payload = {
                         "id": record["id"],
@@ -62,11 +100,8 @@ def export_bundle(output: Path) -> Path:
             rel_count = 0
             with archive.open("relationships.jsonl", "w") as handle:
                 for record in session.run(
-                    """
-                    MATCH (a)-[r]->(b)
-                    RETURN elementId(a) AS source_id, elementId(b) AS target_id,
-                           type(r) AS type, properties(r) AS props
-                    """
+                    _RELS_ACTIVE_ONLY if active_only else _RELS_ALL,
+                    **({"run": run_id} if active_only else {}),
                 ):
                     payload = {
                         "source_id": record["source_id"],
@@ -86,6 +121,7 @@ def export_bundle(output: Path) -> Path:
                 "relationship_count": rel_count,
                 "embed_dim": int(os.getenv("EMBED_DIM", "512")),
                 "embed_model": os.getenv("EMBED_MODEL", "BAAI/bge-small-zh-v1.5"),
+                "active_run_id": run_id,
                 "notes": "Contains Chunk.embedding vectors and domain entities. Recreate indexes after import.",
             }
             archive.writestr("manifest.json", json.dumps(meta, ensure_ascii=False, indent=2))
@@ -103,8 +139,13 @@ def main() -> int:
         default=ROOT / "dist" / "zhongyaoxue-kg-bundle.zip",
         help="Output zip path",
     )
+    parser.add_argument(
+        "--active-only",
+        action="store_true",
+        help="只导出 ACTIVE run 的 Assertion/Entity/IngestRun，排除已废弃的历史 run",
+    )
     args = parser.parse_args()
-    export_bundle(args.output)
+    export_bundle(args.output, active_only=args.active_only)
     return 0
 
 
