@@ -202,21 +202,6 @@
             to { transform: rotate(360deg); }
         }
 
-        #search-box {
-            width: 100%;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-            color: #fff;
-            font-size: 14px;
-        }
-
-        #search-box:focus {
-            outline: none;
-            border-color: #4fc3f7;
-        }
-
         .stat {
             display: flex;
             justify-content: space-between;
@@ -603,8 +588,7 @@
         }
 
         .retrieval-selector select,
-        #question-input,
-        #search-box {
+        #question-input {
             width: 100%;
             color: var(--ink);
             background: rgba(238, 233, 220, 0.78);
@@ -633,14 +617,8 @@
             resize: vertical;
         }
 
-        #search-box {
-            padding: 10px 12px;
-            font-size: 14px;
-        }
-
         .retrieval-selector select:focus,
-        #question-input:focus,
-        #search-box:focus {
+        #question-input:focus {
             outline: 2px solid rgba(86, 120, 100, 0.22);
             border-color: var(--pine-soft);
         }
@@ -1019,11 +997,6 @@
                     <button type="button" class="quick-prompt" data-question="比较人参和黄芪的功效异同。">人参 / 黄芪</button>
                 </div>
                 <div id="answer-box"></div>
-            </div>
-
-            <div class="section">
-                <div class="section-title">搜索</div>
-                    <input type="text" id="search-box" placeholder="搜索药名、功效或经脉...">
             </div>
 
             <div class="section">
@@ -1407,32 +1380,6 @@
                 input.value = prompt.dataset.question || '';
                 input.focus();
             });
-        });
-
-        // Search: show matched entities as a small graph instead of scanning a full canvas
-        let searchTimer = null;
-        document.getElementById('search-box').addEventListener('input', (e) => {
-            const query = e.target.value.trim();
-            clearTimeout(searchTimer);
-            if (query.length < 2) return;
-
-            searchTimer = setTimeout(async () => {
-                try {
-                    const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
-                    const data = await response.json();
-                    if (!data.results || data.results.length === 0) return;
-                    updateGraph({
-                        nodes: data.results.map(r => ({
-                            id: r.id,
-                            label: r.name,
-                            type: r.type
-                        })),
-                        edges: []
-                    });
-                } catch (error) {
-                    console.error('Error searching:', error);
-                }
-            }, 250);
         });
 
         // A quiet leaf trail gives the interface a tactile herbal signature without
