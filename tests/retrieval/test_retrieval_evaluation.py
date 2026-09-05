@@ -7,13 +7,13 @@ def test_dataset_validator_reports_120_frozen_questions():
     dataset = load_dataset()
 
     assert dataset.summary["total"] == 120
-    assert dataset.summary["evidence_adjudicated"] == 0
+    assert dataset.summary["evidence_adjudicated"] == 118
     assert dataset.validation_errors == []
 
 
 def test_evaluator_does_not_invent_page_metric_without_gold_pages():
     dataset = load_dataset()
-    sample = dataset.rows[0]
+    sample = next(row for row in dataset.rows if not row["gold_pages"])
     predictions = {
         sample["id"]: {
             "intent": sample["expected_route"],
@@ -24,7 +24,7 @@ def test_evaluator_does_not_invent_page_metric_without_gold_pages():
         }
     }
 
-    report = evaluate_predictions(dataset.rows[:1], predictions)
+    report = evaluate_predictions([sample], predictions)
 
     assert report["route_accuracy"] == 1.0
     assert report["entity_recall"] == 1.0

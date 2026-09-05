@@ -73,6 +73,10 @@ def load_dataset(path: str | Path = DEFAULT_DATASET) -> RetrievalDataset:
             errors.append(f"{row.get('id', '<missing-id>')}: missing {sorted(missing)}")
         if row.get("split") not in {"dev", "test"}:
             errors.append(f"{row.get('id')}: invalid split")
+        if row.get("type") in {"reverse", "intersect"} and not row.get(
+            "gold_result_entities"
+        ):
+            errors.append(f"{row.get('id')}: missing gold_result_entities")
     adjudicated = sum(
         bool(row.get("gold_pages") and row.get("gold_chunk_ids")) for row in rows
     )

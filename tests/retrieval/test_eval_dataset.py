@@ -59,4 +59,18 @@ def test_dataset_readme_documents_annotation_status():
     readme = DATASET.with_name("README.md").read_text(encoding="utf-8")
 
     assert "人工仲裁" in readme
-    assert "不可" in readme and "当前图谱输出" in readme
+    assert "不可" in readme and "待测系统的当前输出" in readme
+
+
+def test_human_adjudication_and_result_gold_are_complete():
+    rows = _load_rows()
+
+    assert sum(bool(row["gold_pages"] and row["gold_chunk_ids"]) for row in rows) == 118
+    assert all(row["annotation_status"] == "human_adjudicated" for row in rows)
+    assert all(
+        row.get("gold_result_entities")
+        for row in rows
+        if row["type"] in {"reverse", "intersect"}
+    )
+    target = next(row for row in rows if row["id"] == "retr-intersect-004")
+    assert target["gold_result_entities"] == ["黄芩", "黄连", "黄柏", "苦参", "穿心莲"]

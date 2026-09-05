@@ -16,6 +16,8 @@
 - [`待办与注意事项/`](待办与注意事项/) —— [注意事项](待办与注意事项/注意事项.md)（会踩的坑）、
   [待办清单](待办与注意事项/待办清单.md)（按 Owner 划分）、
   [已知局限](待办与注意事项/已知局限.md)（系统边界）
+- 检索评测 —— [120 题一览](检索评测集120题一览.md)、
+  [人工仲裁结果](检索评测集120题人工仲裁结果.md)（答案、页码与 Chunk 证据）
 
 ---
 
@@ -106,7 +108,7 @@ graphragexpr/
 │   ├── extractor.py                    抽取管线整合
 │   ├── llm_client.py                   统一 LLM 客户端（重试/JSON 校验/失败清单）
 │   ├── corpus.py                       页码感知的 Markdown 分块（新旧共用）
-│   ├── build_kg_dyn.py                 ← 旧版建图，保留作对照基线（见 §9）
+│   ├── build_kg_dyn.py                 ← 旧版建图，保留作对照基线（见 §10）
 │   └── rag_graph.py / rag_vector.py    ← 旧版检索脚本，同上
 ├── linking/entity_resolver.py          I1 分层实体消歧
 ├── storage/
@@ -129,6 +131,8 @@ scripts/
 
 origdata/                               本地语料目录（默认不提交）
 eval/retrieval/questions.jsonl          120 题分型检索评测集
+检索评测集120题一览.md                  面向人的题目清单
+检索评测集120题人工仲裁结果.md          人工答案与教材证据
 tests/kg/ + tests/retrieval/             建图与检索测试
 ```
 
@@ -314,7 +318,27 @@ Serving 边只投影 `ACTIVE + ACCEPTED + POSITIVE` 的断言，可随时重建�
 
 ---
 
-## 8. 把已建好的图谱分享给别人（无需云服务器）
+## 8. 检索评测集
+
+`eval/retrieval/questions.jsonl` 冻结了 120 题：attr 25、reverse 20、intersect 20、
+compare 20、path 20、safety 15。2026-09-05 的人工仲裁结果为 113 题正常作答、
+7 题必须拒答；118 题已填写教材页码和稳定 Chunk ID，另外两道拒答题因题设明确
+不存在来源证据而保留空数组。40 道反向/交集题均填写了 `gold_result_entities`，
+开放集合允许超过 5 个金标答案。
+
+```powershell
+python scripts\eval_retrieval.py --validate-only
+python scripts\eval_retrieval.py --predictions path\to\predictions.jsonl
+```
+
+当前脚本可计算路由、查询实体、谓词、拒答和页码指标；尚未实现基于排序 Chunk 的
+`Recall@5`。因此可以说“120 题及人工证据金标已完成”，但在补齐排序预测格式和
+`Chunk Recall@5` 评分前，不能声称已经达到设计文档中的 `Recall@5 ≥ 90%` 门槛。
+逐题答案和证据见[人工仲裁结果](检索评测集120题人工仲裁结果.md)。
+
+---
+
+## 9. 把已建好的图谱分享给别人（无需云服务器）
 
 向量写在 Neo4j 的 `Chunk.embedding` 上，与图谱、索引在同一库中，打包成离线 zip 分发。
 
@@ -364,7 +388,7 @@ python -c "from dotenv import load_dotenv; load_dotenv(); from graphragexpr.stor
 
 ---
 
-## 9. 旧管线（对照基线）
+## 10. 旧管线（对照基线）
 
 `graphragexpr/extract/build_kg_dyn.py` 与 `build_kg_dyn.ps1` 是改造前的建图方式，
 **刻意保留**，用途有二：
@@ -373,7 +397,7 @@ python -c "from dotenv import load_dotenv; load_dotenv(); from graphragexpr.stor
 2. 前端的纯向量、向量+图遍历、混合+图遍历三种模式仍读旧图实体。
 
 两者互不干扰：旧管线的关系不带 `fact_key`，新管线的投影清理只作用于带 `fact_key`
-的边。若只想跑新管线，不需要执行 `build_kg_dyn.ps1`——从数据包导入即可（§8）。
+的边。若只想跑新管线，不需要执行 `build_kg_dyn.ps1`——从数据包导入即可（§9）。
 
 > ⚠ 旧管线仍会 `DETACH DELETE` 全库（受 `.env` 的 `CLEAR_DATABASE` 控制），
 > 在已有 v2 数据的库上执行会连新图一起清掉。详见
@@ -401,9 +425,9 @@ python -c "from dotenv import load_dotenv; load_dotenv(); from graphragexpr.stor
 |---|---|---|
 | ingest / OCR / 结构解析 | A | 条目边界识别已实现（覆盖 86.7%），字段级解析待补 |
 | **建图与本体** | **B** | **已完成**，含量化评测与阈值标定 |
-| **检索** | **C** | **主链已实现**：六类路由、交集、对比摘要、受限路径和 120 题问题集 |
+| **检索** | **C** | **主链与金标已完成**：六类路由、交集、对比摘要、受限路径，以及 120 题人工仲裁数据集 |
 | 结构化注入与生成 | D | 仅设计，无引用校验 |
-| 评测与集成 | E | 抽取评测已有；检索问题集已冻结，页码/Chunk 金标待人工仲裁；生成评测待做 |
+| 评测与集成 | E | 抽取评测与检索金标已有；排序 Chunk 的 Recall@5 和生成评测待实现 |
 
 实测对比（全新环境、按金标事实评分）：单药属性题上新图 3/3 且全部带页码，
 旧链路 0/3；但总论题上新图 1/2、旧纯向量 2/2——因为总论知识不构成实体关系，
