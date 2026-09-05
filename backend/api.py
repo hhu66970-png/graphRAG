@@ -2,14 +2,16 @@
 """
 Flask backend API for serving knowledge graph data to visualization
 """
-from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS
-from functools import lru_cache
+import json
 import os
-from pathlib import Path
 import re
 import sys
+from functools import lru_cache
+from pathlib import Path
+
 from dotenv import load_dotenv
+from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
 from neo4j import GraphDatabase
 from openai import OpenAI
 
@@ -87,8 +89,15 @@ def _chunk_record(record) -> dict:
     }
 
 
-def _keyword_graph_search(question, top_k=RETRIEVAL_TOP_K):
-    """Fuse Neo4j fulltext + vector Top-K, then expand a capped local subgraph."""
+def _keyword_graph_search(
+    question,
+    top_k=RETRIEVAL_TOP_K,
+    *,
+    use_fulltext=True,
+    use_vector=None,
+    expand_graph=True,
+):
+    """Native fulltext/vector retrieval with optional same-source graph expansion."""
     database = os.getenv("NEO4J_DB") or None
     candidate_count = RETRIEVAL_CANDIDATE_K
 
@@ -112,69 +121,75 @@ def _keyword_graph_search(question, top_k=RETRIEVAL_TOP_K):
             )
         ]
 
-        fulltext_query = _build_fulltext_query(question, exact_terms)
         lexical_candidates = []
-        try:
-            lexical_candidates = [
-                {
-                    **_chunk_record(record),
-                    "score": float(record["lexical_score"] or 0.0),
-                    "lexical_score": float(record["lexical_score"] or 0.0),
-                    "matched_terms": [
-                        term for term in exact_terms
-                        if term and term in (record["text"] or "")
-                    ],
-                }
-                for record in session.run(
-                    """
-                    CALL db.index.fulltext.queryNodes('text_fulltext', $fulltext_query)
-                    YIELD node, score
-                    WHERE node:Chunk AND node.text IS NOT NULL
-                    RETURN elementId(node) AS id, node.index AS index,
-                           node.text AS text, node.page_start AS page_start,
-                           node.page_end AS page_end, node.section AS section,
-                           score AS lexical_score
-                    ORDER BY score DESC
-                    LIMIT $candidate_count
-                    """,
-                    fulltext_query=fulltext_query,
-                    candidate_count=candidate_count,
-                )
-            ]
-        except Exception as exc:
-            print(f"Fulltext retrieval fallback ({exc})")
-            # Fallback: targeted CONTAINS on a few entity names, never full-table BM25.
-            seed = exact_terms[:5] or [question[:8]]
-            lexical_candidates = [
-                {
-                    **_chunk_record(record),
-                    "score": float(record["hit_count"] or 0.0),
-                    "lexical_score": float(record["hit_count"] or 0.0),
-                    "matched_terms": [
-                        term for term in exact_terms
-                        if term and term in (record["text"] or "")
-                    ],
-                }
-                for record in session.run(
-                    """
-                    UNWIND $seeds AS seed
-                    MATCH (chunk:Chunk)
-                    WHERE chunk.text CONTAINS seed
-                    WITH chunk, count(*) AS hit_count
-                    RETURN elementId(chunk) AS id, chunk.index AS index,
-                           chunk.text AS text, chunk.page_start AS page_start,
-                           chunk.page_end AS page_end, chunk.section AS section,
-                           hit_count
-                    ORDER BY hit_count DESC, chunk.index
-                    LIMIT $candidate_count
-                    """,
-                    seeds=seed,
-                    candidate_count=candidate_count,
-                )
-            ]
+        if use_fulltext:
+            fulltext_query = _build_fulltext_query(question, exact_terms)
+            try:
+                lexical_candidates = [
+                    {
+                        **_chunk_record(record),
+                        "score": float(record["lexical_score"] or 0.0),
+                        "lexical_score": float(record["lexical_score"] or 0.0),
+                        "matched_terms": [
+                            term for term in exact_terms
+                            if term and term in (record["text"] or "")
+                        ],
+                    }
+                    for record in session.run(
+                        """
+                        CALL db.index.fulltext.queryNodes('text_fulltext', $fulltext_query)
+                        YIELD node, score
+                        WHERE node:Chunk AND node.text IS NOT NULL
+                        RETURN elementId(node) AS id, node.index AS index,
+                               node.text AS text, node.page_start AS page_start,
+                               node.page_end AS page_end, node.section AS section,
+                               score AS lexical_score
+                        ORDER BY score DESC
+                        LIMIT $candidate_count
+                        """,
+                        fulltext_query=fulltext_query,
+                        candidate_count=candidate_count,
+                    )
+                ]
+            except Exception as exc:
+                print(f"Fulltext retrieval fallback ({exc})")
+                # Targeted CONTAINS fallback; never scan every Chunk in Python.
+                seed = exact_terms[:5] or [question[:8]]
+                lexical_candidates = [
+                    {
+                        **_chunk_record(record),
+                        "score": float(record["hit_count"] or 0.0),
+                        "lexical_score": float(record["hit_count"] or 0.0),
+                        "matched_terms": [
+                            term for term in exact_terms
+                            if term and term in (record["text"] or "")
+                        ],
+                    }
+                    for record in session.run(
+                        """
+                        UNWIND $seeds AS seed
+                        MATCH (chunk:Chunk)
+                        WHERE chunk.text CONTAINS seed
+                        WITH chunk, count(*) AS hit_count
+                        RETURN elementId(chunk) AS id, chunk.index AS index,
+                               chunk.text AS text, chunk.page_start AS page_start,
+                               chunk.page_end AS page_end, chunk.section AS section,
+                               hit_count
+                        ORDER BY hit_count DESC, chunk.index
+                        LIMIT $candidate_count
+                        """,
+                        seeds=seed,
+                        candidate_count=candidate_count,
+                    )
+                ]
 
         vector_candidates = []
-        if (os.getenv("EMBED_PROVIDER") or "hash").lower() != "hash":
+        vector_enabled = (
+            (os.getenv("EMBED_PROVIDER") or "hash").lower() != "hash"
+            if use_vector is None
+            else use_vector
+        )
+        if vector_enabled:
             query_embedding = _configured_embedder().embed_query(question)
             vector_candidates = [
                 {
@@ -268,7 +283,7 @@ def _keyword_graph_search(question, top_k=RETRIEVAL_TOP_K):
     nodes = {}
     edges = []
     triples = []
-    if chunk_ids:
+    if chunk_ids and expand_graph:
         with driver.session(database=database) as session:
             records = session.run(
                 """
@@ -282,10 +297,10 @@ def _keyword_graph_search(question, top_k=RETRIEVAL_TOP_K):
                 RETURN DISTINCT
                        elementId(entity) AS source_id,
                        labels(entity)[0] AS source_label,
-                       entity.name AS source_name,
+                       coalesce(entity.preferred_name, entity.name) AS source_name,
                        elementId(neighbor) AS target_id,
                        labels(neighbor)[0] AS target_label,
-                       neighbor.name AS target_name,
+                       coalesce(neighbor.preferred_name, neighbor.name) AS target_name,
                        type(relationship) AS relationship_type
                 LIMIT $record_limit
                 """,
@@ -336,83 +351,118 @@ def _keyword_graph_search(question, top_k=RETRIEVAL_TOP_K):
     return ranked_chunks, {"nodes": list(nodes.values()), "edges": edges}, triples
 
 
-def _answer_with_kg_v2(question):
-    """Answer from the v2 evidence graph's typed serving projection.
+def _evidence_only_answer(packet):
+    """Render a truthful answer when retrieval is available but no LLM is configured."""
+    statements = []
+    seen = set()
+    for item in packet.items[:12]:
+        subject = item.qualifiers.get("subject_name") or item.subject_id
+        object_name = item.qualifiers.get("object_name") or item.object_id
+        predicate = item.predicate or "教材证据"
+        page = (
+            item.page_start
+            if item.page_start == item.page_end
+            else f"{item.page_start}-{item.page_end}"
+        )
+        if subject and object_name:
+            claim = f"{subject} -[{predicate}]-> {object_name}"
+        elif subject:
+            claim = f"{subject}：{predicate}"
+        else:
+            claim = predicate
+        quote = " ".join(item.evidence_quote.split())
+        statement = f"{claim}（PDF 第 {page} 页）：{quote}"
+        if statement not in seen:
+            seen.add(statement)
+            statements.append(statement)
+    return "未配置 LLM_TOKEN，以下为真实知识图谱检索到的结构化证据：" + "；".join(
+        statements
+    )
 
-    这是一条**演示用**的读取路径：实体链接用最长匹配、只处理单药属性聚合，
-    完整的意图路由（attr/reverse/intersect/compare）与结构化注入属 retrieval /
-    structuring 层的工作（SKILL §5.6 / §5.7），不在此实现。
 
-    API 层在这里只做编排，全部图查询委托给 storage.serving_read（SKILL §5.9）。
-    """
+def _answer_with_auto(question):
+    """Run rule-first v2 retrieval and pass only its EvidencePacket to generation."""
     from graphragexpr.domain.ontology import load_ontology
-    from graphragexpr.storage import serving_read
+    from graphragexpr.retrieval import retrieve
     from graphragexpr.storage.neo4j_store import Neo4jStore
 
     store = Neo4jStore()
     try:
-        run_id = serving_read.active_run(store)
-        if not run_id:
-            raise RuntimeError("没有 ACTIVE 的 IngestRun，请先运行 scripts/build_kg_v2.py")
-
-        ontology = load_ontology()
-        linked = serving_read.link_entities_in_text(store, question, run_id=run_id)
-        herb = next((e for e in linked if e["entity_type"] == "HERB"), None)
-
-        if herb is None:
-            constraint = next(iter(linked), None)
-            if constraint is None:
-                return (
-                    "问题中未能链接到知识图谱中的中药或功效实体，无法基于图谱作答。",
-                    {"nodes": [], "edges": []}, [],
-                )
-            # 反向检索：哪些药具有该功效/主治
-            rows = serving_read.find_herbs_by_effect(
-                store, constraint["name"], run_id=run_id
-            )
-            if not rows:
-                return (
-                    f"知识图谱中没有与「{constraint['name']}」关联的中药记录。",
-                    {"nodes": [], "edges": []}, [],
-                )
-            listed = "、".join(f"{r['herb']}（第{r['page_start']}页）" for r in rows[:15])
-            return (
-                f"教材中与「{constraint['name']}」相关的中药包括：{listed}。\n"
-                "以上结果直接来自知识图谱的类型化关系，每味药后为教材页码。",
-                {"nodes": [], "edges": []},
-                [{"page_start": r["page_start"], "page_end": r["page_start"],
-                  "score": float(r["score"] or 0), "matched_terms": [r["predicate"]]}
-                 for r in rows[:15]],
-            )
-
-        card = serving_read.get_herb_card(store, ontology, herb["name"], run_id=run_id)
-        if card is None or card.is_empty():
-            return (
-                f"知识图谱中没有「{herb['name']}」的属性记录。",
-                {"nodes": [], "edges": []}, [],
-            )
-
-        evidence_ids = [eid for slot in card.slots for eid in slot.evidence_ids][:12]
-        evidence = serving_read.load_evidence(store, evidence_ids)
-        context, sources = serving_read.card_to_context(card, evidence)
+        result = retrieve(
+            store,
+            load_ontology(),
+            question,
+            fallback_retriever=_keyword_graph_search,
+        )
     finally:
         store.close()
 
-    prompt = f"""请严格依据下面从《中药学》知识图谱中检索到的结构化事实回答问题。
+    packet = result.packet
+    sources = [
+        {
+            "evidence_id": item.evidence_id,
+            "chunk_id": item.chunk_id,
+            "page_start": item.page_start,
+            "page_end": item.page_end,
+            "score": item.retrieval_score,
+            "matched_terms": [item.predicate] if item.predicate else [],
+            "evidence_quote": item.evidence_quote,
+        }
+        for item in packet.items
+    ]
+    if not packet.items:
+        warning = packet.warnings[0] if packet.warnings else "没有检索到可定位证据"
+        return (
+            f"证据不足，无法基于当前知识图谱作答：{warning}。",
+            result.subgraph,
+            sources,
+            packet,
+        )
 
-规则：
-1. 只使用给定事实，不得补充图谱之外的知识；
-2. 每条关键结论后标注其对应的 PDF 页码；
-3. 涉及剂量、毒性、禁忌时，提醒以教材原文和专业人员意见为准；
-4. 给定事实不足以回答时，如实说明缺什么。
+    llm_token = (os.getenv("LLM_TOKEN") or "").strip()
+    if not llm_token:
+        return _evidence_only_answer(packet), result.subgraph, sources, packet
+
+    context_lines = []
+    for index, item in enumerate(packet.items, start=1):
+        page = (
+            item.page_start
+            if item.page_start == item.page_end
+            else f"{item.page_start}-{item.page_end}"
+        )
+        relation = f"，关系 {item.predicate}" if item.predicate else ""
+        path = f"，路径 {item.path}" if item.path else ""
+        subject = item.qualifiers.get("subject_name") or item.subject_id or "未知主语"
+        object_name = item.qualifiers.get("object_name") or item.object_id
+        object_label = f"｜宾语={object_name}" if object_name else ""
+        context_lines.append(
+            f"[证据 {index}｜evidence_id={item.evidence_id}｜"
+            f"PDF 第 {page} 页｜retrieval_score={item.retrieval_score:.3f}"
+            f"｜主语={subject}{object_label}{relation}{path}]\n"
+            f"{item.evidence_quote}"
+        )
+
+    retrieval_trace = json.dumps(packet.trace, ensure_ascii=False, indent=2)
+
+    prompt = f"""请严格依据下面的《中药学》结构化检索证据回答问题。
+不得使用证据外知识；关键结论必须引用对应 PDF 页码。
+部分匹配不得表述为全部满足。
+涉及剂量、毒性、禁忌、孕妇或儿童时，只能逐字依据证据，
+并提醒以教材原文和专业人员意见为准。
+
+# 检索意图
+{packet.intent}
 
 # 问题
 {question}
 
-# 知识图谱事实（含出处页码）
-{context}
+# EvidencePacket
+{chr(10).join(context_lines)}
+
+# 检索 trace（交集题以 constraint_matrix.exact_match 为准）
+{retrieval_trace}
 """
-    client = OpenAI(api_key=os.getenv("LLM_TOKEN"), base_url=os.getenv("LLM_ENDPOINT") or None)
+    client = OpenAI(api_key=llm_token, base_url=os.getenv("LLM_ENDPOINT") or None)
     response = client.chat.completions.create(
         model=os.getenv("LLM_MODEL", "deepseek-chat"),
         messages=[
@@ -422,11 +472,18 @@ def _answer_with_kg_v2(question):
         temperature=0,
     )
     answer = response.choices[0].message.content or "模型没有返回答案"
-    return answer, card.subgraph, sources
+    return answer, result.subgraph, sources, packet
 
 
-def _answer_with_keyword_graph(question):
-    chunks, subgraph, triples = _keyword_graph_search(question)
+def _answer_with_keyword_graph(
+    question, *, use_fulltext=True, use_vector=None, expand_graph=True
+):
+    chunks, subgraph, triples = _keyword_graph_search(
+        question,
+        use_fulltext=use_fulltext,
+        use_vector=use_vector,
+        expand_graph=expand_graph,
+    )
     if not chunks:
         raise RuntimeError("数据库中没有可检索的教材文本块")
 
@@ -710,14 +767,14 @@ def search_entities():
     query = """
     MATCH (n)
     WHERE NOT n:Chunk AND NOT n:Document
-      AND toLower(coalesce(n.name, '')) CONTAINS toLower($query)
+      AND toLower(coalesce(n.name, '')) CONTAINS toLower($search_text)
     RETURN elementId(n) as id, labels(n)[0] as type, n.name as name
     LIMIT 20
     """
 
     try:
         with driver.session() as session:
-            result = session.run(query, query=query_text)
+            result = session.run(query, search_text=query_text)
             entities = [dict(record) for record in result]
             return jsonify({"results": entities}), 200
     except Exception as e:
@@ -729,259 +786,49 @@ def graphrag_query():
     """Perform GraphRAG query and return answer with subgraph used"""
     data = request.get_json()
     question = data.get('question', '')
-    method = data.get('method', 'keyword_graph')
+    method = data.get('method', 'auto')
 
     if not question:
         return jsonify({"error": "Question is required"}), 400
 
     try:
-        if method == 'kg_v2':
-            answer, subgraph, sources = _answer_with_kg_v2(question)
+        if method in {'auto', 'kg_v2'}:
+            answer, subgraph, sources, packet = _answer_with_auto(question)
             return jsonify({
-                "answer": answer, "method": method,
-                "subgraph": subgraph, "sources": sources,
+                "answer": answer,
+                "method": method,
+                "intent": packet.intent,
+                "subgraph": subgraph,
+                "sources": sources,
+                "trace": packet.trace,
+                "warnings": packet.warnings,
+                "abstained": not bool(packet.items),
+                "claims": [],
             }), 200
 
-        if method == 'keyword_graph':
-            answer, subgraph, sources = _answer_with_keyword_graph(question)
+        native_modes = {
+            "keyword_graph": {"use_fulltext": True, "use_vector": None, "expand_graph": True},
+            "vector": {"use_fulltext": False, "use_vector": True, "expand_graph": False},
+            "vector_cypher": {"use_fulltext": False, "use_vector": True, "expand_graph": True},
+            "hybrid": {"use_fulltext": True, "use_vector": True, "expand_graph": False},
+            "hybrid_cypher": {"use_fulltext": True, "use_vector": True, "expand_graph": True},
+        }
+        if method in native_modes:
+            answer, subgraph, sources = _answer_with_keyword_graph(
+                question, **native_modes[method]
+            )
             return jsonify({
                 "answer": answer,
                 "method": method,
                 "subgraph": subgraph,
                 "sources": sources,
             }), 200
-
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent.parent / "graphragexpr"))
-
-        from external_embedder import ExternalEmbedder
-        from neo4j_graphrag.llm import OpenAILLM
-        from neo4j_graphrag.retrievers import (
-            VectorRetriever,
-            VectorCypherRetriever,
-            HybridRetriever,
-            HybridCypherRetriever
-        )
-        from neo4j_graphrag.generation import GraphRAG, RagTemplate
-
-        # Initialize components
-        embedder = ExternalEmbedder(dimension=int(os.getenv("EMBED_DIM", "1536")))
-
-        api_key = os.getenv("LLM_TOKEN")
-        base_url = os.getenv("LLM_ENDPOINT", "https://api.deepseek.com")
-
-        llm = OpenAILLM(
-            model_name=os.getenv("LLM_MODEL", "deepseek-chat"),
-            api_key=api_key,
-            base_url=base_url,
-            model_params={"temperature": 0}
-        )
-
-        # Select retriever based on method
-        if method == 'vector':
-            # Pure vector search
-            retriever = VectorRetriever(
-                driver=driver,
-                index_name="text_embeddings",
-                embedder=embedder,
-                return_properties=["text"]
-            )
-        elif method == 'vector_cypher':
-            # Vector search + graph traversal
-            retrieval_query = """
-            WITH node AS chunk
-            MATCH (chunk)<-[:FROM_CHUNK]-(entity)-[rel*0..2]-(neighbor)
-            WHERE NOT neighbor:Chunk AND NOT neighbor:Document
-            WITH DISTINCT chunk, entity, neighbor, rel
-            WITH chunk,
-                 collect(DISTINCT chunk.text) AS texts,
-                 collect(DISTINCT {
-                   source_id: elementId(entity),
-                   source_name: coalesce(entity.name, ''),
-                   source_type: labels(entity)[0],
-                   target_id: elementId(neighbor),
-                   target_name: coalesce(neighbor.name, ''),
-                   target_type: labels(neighbor)[0],
-                   relationships: [r IN rel | type(r)]
-                 }) as graph_data
-            WITH reduce(s = '', text IN texts |
-                    s + CASE WHEN s = '' THEN text ELSE '\n---\n' + text END
-                 ) AS context_text,
-                 graph_data
-            RETURN context_text as info, graph_data
-            """
-            retriever = VectorCypherRetriever(
-                driver=driver,
-                index_name="text_embeddings",
-                embedder=embedder,
-                retrieval_query=retrieval_query
-            )
-        elif method == 'hybrid':
-            # Hybrid: vector + fulltext (requires fulltext index)
-            retriever = HybridRetriever(
-                driver=driver,
-                vector_index_name="text_embeddings",
-                fulltext_index_name="text_fulltext",  # Need to create this
-                embedder=embedder,
-                return_properties=["text"]
-            )
-        elif method == 'hybrid_cypher':
-            # Hybrid + graph traversal
-            retrieval_query = """
-            WITH node AS chunk
-            MATCH (chunk)<-[:FROM_CHUNK]-(entity)-[rel*0..2]-(neighbor)
-            WHERE NOT neighbor:Chunk AND NOT neighbor:Document
-            WITH DISTINCT chunk, entity, neighbor, rel
-            WITH chunk,
-                 collect(DISTINCT chunk.text) AS texts,
-                 collect(DISTINCT {
-                   source_id: elementId(entity),
-                   source_name: coalesce(entity.name, ''),
-                   source_type: labels(entity)[0],
-                   target_id: elementId(neighbor),
-                   target_name: coalesce(neighbor.name, ''),
-                   target_type: labels(neighbor)[0],
-                   relationships: [r IN rel | type(r)]
-                 }) as graph_data
-            WITH reduce(s = '', text IN texts |
-                    s + CASE WHEN s = '' THEN text ELSE '\n---\n' + text END
-                 ) AS context_text,
-                 graph_data
-            RETURN context_text as info, graph_data
-            """
-            retriever = HybridCypherRetriever(
-                driver=driver,
-                vector_index_name="text_embeddings",
-                fulltext_index_name="text_fulltext",
-                embedder=embedder,
-                retrieval_query=retrieval_query
-            )
-        else:
-            return jsonify({"error": f"Unknown method: {method}"}), 400
-
-        # Create RAG template
-        rag_template = RagTemplate(
-            template="""你是一个严谨的中药学教材问答助手。请仅根据以下上下文回答问题，
-上下文包括相关教材片段和知识图谱三元组。如果上下文不足以回答，请如实说明，不得补造药效、剂量或禁忌。
-回答涉及用法用量、毒性或临床建议时，提醒用户以教材原文和专业人员意见为准。
-
-# 问题：
-{query_text}
-
-# 上下文：
-{context}
-
-# 回答：
-""",
-            expected_inputs=["query_text", "context"],
-        )
-
-        # Create GraphRAG instance
-        graph_rag = GraphRAG(retriever=retriever, llm=llm, prompt_template=rag_template)
-
-        # Perform search
-        response = graph_rag.search(
-            query_text=question,
-            retriever_config={"top_k": 3},
-        )
-
-        # Extract subgraph for *Cypher methods by querying Neo4j directly
-        subgraph = {"nodes": [], "edges": []}
-
-        if method in ['vector_cypher', 'hybrid_cypher']:
-            try:
-                # Get query embedding to find which chunks were retrieved
-                query_embedding = embedder.embed_query(question)
-
-                # Find relevant chunks that were used in retrieval
-                chunk_query = """
-                CALL db.index.vector.queryNodes('text_embeddings', $top_k, $query_embedding)
-                YIELD node, score
-                RETURN elementId(node) as chunk_id
-                """
-
-                with driver.session() as session:
-                    result = session.run(chunk_query, query_embedding=query_embedding, top_k=3)
-                    chunk_ids = [record['chunk_id'] for record in result]
-
-                    if chunk_ids:
-                        # Get subgraph around those chunks (same as retrieval_query pattern)
-                        subgraph_query = """
-                        UNWIND $chunk_ids AS chunk_id
-                        MATCH (chunk) WHERE elementId(chunk) = chunk_id
-                        MATCH (chunk)<-[:FROM_CHUNK]-(entity)-[rel*0..2]-(neighbor)
-                        WHERE NOT neighbor:Chunk AND NOT neighbor:Document
-                        WITH DISTINCT entity, neighbor, rel
-                        UNWIND CASE WHEN rel = [] THEN [null] ELSE rel END AS r
-                        WITH DISTINCT
-                            CASE WHEN r IS NULL THEN entity ELSE startNode(r) END as source,
-                            CASE WHEN r IS NULL THEN null ELSE endNode(r) END as target,
-                            CASE WHEN r IS NULL THEN null ELSE type(r) END as rel_type
-                        WHERE source IS NOT NULL
-                        RETURN DISTINCT
-                            elementId(source) as source_id,
-                            labels(source)[0] as source_label,
-                            coalesce(source.name, 'unknown') as source_name,
-                            CASE WHEN target IS NOT NULL THEN elementId(target) END as target_id,
-                            CASE WHEN target IS NOT NULL THEN labels(target)[0] END as target_label,
-                            CASE WHEN target IS NOT NULL THEN coalesce(target.name, 'unknown') END as target_name,
-                            rel_type
-                        """
-
-                        result = session.run(subgraph_query, chunk_ids=chunk_ids)
-
-                        nodes_map = {}
-                        edges = []
-
-                        for record in result:
-                            source_id = record['source_id']
-                            if source_id and source_id not in nodes_map:
-                                nodes_map[source_id] = {
-                                    'id': source_id,
-                                    'label': record['source_name'],
-                                    'type': record['source_label']
-                                }
-
-                            target_id = record['target_id']
-                            if target_id:
-                                if target_id not in nodes_map:
-                                    nodes_map[target_id] = {
-                                        'id': target_id,
-                                        'label': record['target_name'],
-                                        'type': record['target_label']
-                                    }
-
-                                if record['rel_type']:
-                                    edges.append({
-                                        'source': source_id,
-                                        'target': target_id,
-                                        'type': record['rel_type']
-                                    })
-
-                        subgraph['nodes'] = list(nodes_map.values())
-                        subgraph['edges'] = edges
-            except Exception as e:
-                print(f"Error extracting subgraph for cypher method: {e}")
-                import traceback
-                traceback.print_exc()
-
-        return jsonify({
-            "answer": response.answer,
-            "method": method,
-            "subgraph": subgraph
-        }), 200
+        return jsonify({"error": f"Unknown method: {method}"}), 400
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-
-@app.teardown_appcontext
-def close_db(error):
-    """Close database connection on app teardown"""
-    pass
 
 
 if __name__ == '__main__':

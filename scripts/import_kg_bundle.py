@@ -12,7 +12,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
-from neo4j_graphrag.indexes import create_vector_index
 
 ROOT = Path(__file__).resolve().parents[1]
 BATCH_SIZE = 200
@@ -138,24 +137,19 @@ def import_bundle(bundle: Path, *, clear: bool) -> None:
 
             dimensions = int(manifest.get("embed_dim") or os.getenv("EMBED_DIM", "512"))
             print("creating vector index text_embeddings...")
-            try:
-                create_vector_index(
-                    driver,
-                    name="text_embeddings",
-                    label="Chunk",
-                    embedding_property="embedding",
-                    dimensions=dimensions,
-                    similarity_fn="cosine",
-                )
-                print("vector index ready")
-            except Exception as exc:
-                message = str(exc).lower()
-                if "already exists" in message or "equivalent" in message:
-                    print("vector index already exists")
-                else:
-                    raise
-
             with driver.session(database=database) as session:
+                session.run(
+                    """
+                    CREATE VECTOR INDEX text_embeddings IF NOT EXISTS
+                    FOR (n:Chunk) ON (n.embedding)
+                    OPTIONS {indexConfig: {
+                      `vector.dimensions`: $dimensions,
+                      `vector.similarity_function`: 'cosine'
+                    }}
+                    """,
+                    dimensions=dimensions,
+                ).consume()
+                print("vector index ready")
                 session.run(
                     """
                     CREATE FULLTEXT INDEX text_fulltext IF NOT EXISTS

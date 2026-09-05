@@ -1,6 +1,6 @@
 services:
   neo4j:
-    image: neo4j:5-community
+    image: neo4j:5.26-community
     ports:
       - "7474:7474"
       - "7687:7687"

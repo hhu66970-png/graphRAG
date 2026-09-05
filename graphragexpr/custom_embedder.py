@@ -4,11 +4,11 @@ Custom embedder that creates simple embeddings without external API calls
 For demonstration purposes - uses basic text hashing for embeddings
 """
 import hashlib
+
 import numpy as np
-from neo4j_graphrag.embeddings.base import Embedder
 
 
-class SimpleHashEmbedder(Embedder):
+class SimpleHashEmbedder:
     """
     Simple embedder that creates deterministic embeddings from text hashing.
     This is for demonstration purposes when OpenAI embeddings are not available.
@@ -25,7 +25,7 @@ class SimpleHashEmbedder(Embedder):
 
         for i in range(self.dimension // 16):
             # Create hash with different seeds
-            hash_input = f"{text}_{i}".encode('utf-8')
+            hash_input = f"{text}_{i}".encode()
             hash_obj = hashlib.sha256(hash_input)
             hash_bytes = hash_obj.digest()
 

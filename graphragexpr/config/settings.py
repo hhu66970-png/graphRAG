@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 
 
 def _env_float(name: str, default: float) -> float:
@@ -100,3 +100,29 @@ class KGSettings:
 
 
 DEFAULT_SETTINGS = KGSettings()
+
+
+@dataclass(frozen=True)
+class RetrievalSettings:
+    """Budgets for intent-aware retrieval (design sections 7.2 and 8.1)."""
+
+    entity_link_limit: int = _env_int("RETRIEVAL_ENTITY_LIMIT", 16)
+    directed_result_limit: int = _env_int("RETRIEVAL_DIRECTED_LIMIT", 25)
+    comparison_fact_limit: int = _env_int("RETRIEVAL_COMPARE_FACT_LIMIT", 120)
+    comparison_chunk_limit: int = _env_int("RETRIEVAL_COMPARE_CHUNK_LIMIT", 80)
+    comparison_per_entity: int = _env_int("RETRIEVAL_COMPARE_PER_ENTITY", 3)
+    comparison_total: int = _env_int("RETRIEVAL_COMPARE_TOTAL", 8)
+    path_max_hops: int = _env_int("RETRIEVAL_PATH_MAX_HOPS", 3)
+    path_limit: int = _env_int("RETRIEVAL_PATH_LIMIT", 20)
+    token_budget: int = _env_int("RETRIEVAL_TOKEN_BUDGET", 4000)
+
+    def __post_init__(self) -> None:
+        for setting in fields(self):
+            if getattr(self, setting.name) <= 0:
+                raise ValueError(f"{setting.name} must be positive")
+
+    def snapshot(self) -> dict:
+        return asdict(self)
+
+
+DEFAULT_RETRIEVAL_SETTINGS = RetrievalSettings()

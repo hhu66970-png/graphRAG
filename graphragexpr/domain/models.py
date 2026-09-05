@@ -1,8 +1,9 @@
 """Frozen public data contracts for the KG construction pipeline (SKILL §6).
 
-字段名一旦冻结不得自行改名；任何公共字段变更都属于契约变更，需 ADR（SKILL §15）。
-本轮只定义建图侧三个契约（ChunkRecord / EntityRecord / AssertionRecord）与其附属
-值对象；EvidencePacket 与 QAResponse 属检索/生成模块，由对应 Owner 定义。
+字段名一旦冻结不得自行改名；任何公共字段变更都属于契约变更，
+需 ADR（SKILL §15）。建图侧契约与检索层 EvidencePacket 集中在这里，
+避免 API、评测和结构化层各自
+复制字段定义。
 """
 
 from __future__ import annotations
@@ -147,3 +148,42 @@ class AssertionRecord(_Base):
             raise ValueError(f"ACCEPTED 断言缺少可定位证据: {self.assertion_id}")
         if not self.chunk_ids:
             raise ValueError(f"ACCEPTED 断言缺少来源 chunk: {self.assertion_id}")
+
+
+class EvidenceItem(_Base):
+    """One evidence-backed retrieval item (SKILL section 6.4)."""
+
+    evidence_id: str
+    claim_key: str | None = None
+    subject_id: str | None = None
+    predicate: str | None = None
+    object_id: str | None = None
+    path: list[dict] | None = None
+    evidence_quote: str
+    chunk_id: str
+    page_start: int
+    page_end: int
+    support_score: float = 0.0
+    retrieval_score: float = 0.0
+    qualifiers: dict = Field(default_factory=dict)
+
+    @field_validator("page_end")
+    @classmethod
+    def _evidence_pages_ordered(cls, v: int, info) -> int:
+        start = info.data.get("page_start")
+        if start is not None and v < start:
+            raise ValueError(f"page_end({v}) 不能小于 page_start({start})")
+        return v
+
+
+class EvidencePacket(_Base):
+    """Frozen hand-off from retrieval to structuring/generation."""
+
+    query_id: str
+    intent: Literal["attr", "reverse", "intersect", "compare", "path", "fallback"]
+    linked_entities: list[dict] = Field(default_factory=list)
+    structure_type: Literal["card", "table", "matrix", "paths", "summary", "chunks"]
+    items: list[EvidenceItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    token_budget: int
+    trace: dict = Field(default_factory=dict)

@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 from dotenv import load_dotenv
-from neo4j_graphrag.embeddings.base import Embedder
 from openai import OpenAI
 
 load_dotenv()
 
 
-class ExternalEmbedder(Embedder):
+class ExternalEmbedder:
     """Generate matching query/document vectors with the configured provider."""
 
     def __init__(self, dimension: int | None = None):

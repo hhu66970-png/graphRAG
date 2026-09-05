@@ -87,7 +87,7 @@ I3 跨块补全（把「本品味辛性凉…」这类省略主语的句子归�
 ## 1. 项目结构
 
 ```text
-backend/api.py                          Flask API（五种检索模式的编排）
+backend/api.py                          Flask API（自动路由 + 对照模式编排）
 frontend/index.html                     中药学知识图谱前端
 
 graphragexpr/
@@ -95,7 +95,7 @@ graphragexpr/
 ├── domain/
 │   ├── ontology.yaml                   受控本体：14 类实体 + 13 个稳定谓词
 │   ├── ontology.py                     本体加载与 domain/range 校验
-│   ├── models.py                       ChunkRecord / EntityRecord / AssertionRecord
+│   ├── models.py                       建图契约 + EvidencePacket
 │   └── ids.py                          稳定 ID（canonical_id / chunk_id / fact_key）
 ├── ingest/structure.py                 从教材版式识别药物条目边界（entry_id）
 ├── extract/
@@ -115,18 +115,21 @@ graphragexpr/
 │   ├── serving_read.py                 属性卡片 / 反向检索 / 证据回溯
 │   ├── runs.py                         IngestRun 原子发布与回滚
 │   └── indexes.py                      约束与索引
-└── evaluation/                         参照集构建与抽取质量评测
+├── retrieval/                          意图路由 / 交集 / 对比摘要 / 受限路径
+└── evaluation/                         抽取与检索评测
 
 scripts/
 ├── preprocess_pdf.py                   扫描 PDF OCR → Markdown
 ├── build_kg_v2.py                      构建证据图谱（主入口）
 ├── verify_kg_v2.py                     新旧对照 + 属性卡片演示
 ├── eval_extraction.py                  抽取质量评测
+├── eval_retrieval.py                   检索集校验与预测评分
 ├── calibrate_thresholds.py             阈值标定曲线
 └── export_kg_bundle.py / import_kg_bundle.py   离线数据包导出/导入
 
 origdata/                               本地语料目录（默认不提交）
-tests/kg/                               建图环节测试（160 项）
+eval/retrieval/questions.jsonl          120 题分型检索评测集
+tests/kg/ + tests/retrieval/             建图与检索测试
 ```
 
 ---
@@ -243,17 +246,20 @@ Serving 边只投影 `ACTIVE + ACCEPTED + POSITIVE` 的断言，可随时重建�
 .\start_backend.ps1
 ```
 
-浏览器打开 <http://localhost:5000>。前端下拉提供五种检索方式：
+浏览器打开 <http://localhost:5000>。前端默认自动判断问题类型：
 
 | 模式 | 说明 |
 |---|---|
-| **证据知识图谱 v2**（默认） | 实体链接 → 类型化属性卡片 → 带页码作答，读 Serving 投影 |
+| **自动意图路由**（默认） | `attr/reverse/intersect/compare/path/fallback` → 定向检索 → 带页码作答 |
+| 证据知识图谱 v2 | 自动路由的兼容入口 |
 | 中文混合向量+图谱 | 中文 BM25 与 BGE 向量融合，块内展开图谱关系 |
-| 纯向量 / 向量+图遍历 / 混合+图遍历 | 保留作课程对比实验 |
+| 纯向量 / 向量+图遍历 / 混合 / 混合+图遍历 | 原生 Neo4j Driver 实现，保留作课程对比实验 |
 
 可尝试的问题：
 
 - “人参的性味、归经和功效是什么？”
+- “哪些药同时具有清热解毒和凉血功效？”
+- “比较人参和黄芪的功效异同。”
 - “影响中药贮藏变异的外界因素有哪些？”
 - “什么是中药？中药材、中药饮片和中成药有什么区别？”
 
@@ -385,7 +391,7 @@ python -c "from dotenv import load_dotenv; load_dotenv(); from graphragexpr.stor
 | `DETACH DELETE` 全库重建 | `IngestRun` 原子发布与回滚 |
 | `sample_data_dyn.py` 按回目取样 | `corpus.py` 按页码与标题取样 |
 | Neo4j 向量/全文检索 | 保持一致，全文索引改用 `cjk` 分析器 |
-| Flask + D3 前端 | 保持一致，新增 v2 检索模式 |
+| Flask + D3 前端 | 保持一致，新增自动意图路由并保留对照模式 |
 
 ---
 
@@ -395,13 +401,13 @@ python -c "from dotenv import load_dotenv; load_dotenv(); from graphragexpr.stor
 |---|---|---|
 | ingest / OCR / 结构解析 | A | 条目边界识别已实现（覆盖 86.7%），字段级解析待补 |
 | **建图与本体** | **B** | **已完成**，含量化评测与阈值标定 |
-| 检索 | C | 仅设计。**意图路由是当前最大的用户可见缺口** |
+| **检索** | **C** | **主链已实现**：六类路由、交集、对比摘要、受限路径和 120 题问题集 |
 | 结构化注入与生成 | D | 仅设计，无引用校验 |
-| 评测与集成 | E | 抽取侧评测已有；检索/生成侧未做 |
+| 评测与集成 | E | 抽取评测已有；检索问题集已冻结，页码/Chunk 金标待人工仲裁；生成评测待做 |
 
 实测对比（全新环境、按金标事实评分）：单药属性题上新图 3/3 且全部带页码，
 旧链路 0/3；但总论题上新图 1/2、旧纯向量 2/2——因为总论知识不构成实体关系，
-不在图里。**这正是需要意图路由的原因**，详见
+不在图里。自动路由会把这类问题送到文本块 fallback，详见
 [已知局限 §1](待办与注意事项/已知局限.md)。
 
 ## 数据与合规

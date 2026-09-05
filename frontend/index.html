@@ -14,7 +14,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #d9d0bd;
             color: #e0e0e0;
             overflow: hidden;
         }
@@ -89,7 +89,7 @@
             margin-bottom: 12px;
             color: #4fc3f7;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0;
         }
 
         .retrieval-selector {
@@ -338,6 +338,8 @@
         }
 
         #graph {
+            position: relative;
+            z-index: 1;
             width: 100%;
             height: 100%;
             cursor: grab;
@@ -429,11 +431,568 @@
             pointer-events: none;
         }
     </style>
+    <style id="herbal-theme">
+        :root {
+            --paper: #f6f2e8;
+            --paper-deep: #ece5d6;
+            --ink: #26352d;
+            --muted: #6b756d;
+            --pine: #29483b;
+            --pine-soft: #567864;
+            --sage: #88a286;
+            --cinnabar: #b45b45;
+            --ochre: #bb8d47;
+            --line: rgba(51, 71, 59, 0.18);
+            --shadow: 0 18px 50px rgba(62, 53, 38, 0.16);
+        }
+
+        html {
+            background: #d9d0bd;
+        }
+
+        body {
+            position: relative;
+            isolation: isolate;
+            min-height: 100vh;
+            background-color: #d9d0bd;
+            background-image: none;
+            color: var(--ink);
+            overflow: hidden;
+        }
+
+        body::before {
+            display: none;
+        }
+
+        #header,
+        #container {
+            position: relative;
+            z-index: 1;
+        }
+
+        #header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 88px;
+            padding: 17px 34px 15px;
+            background: rgba(249, 246, 237, 0.9);
+            border-bottom: 1px solid var(--line);
+            box-shadow: 0 5px 20px rgba(65, 55, 39, 0.08);
+            backdrop-filter: blur(15px);
+        }
+
+        #header h1 {
+            margin: 0;
+            color: var(--pine);
+            font-family: Georgia, 'Times New Roman', 'Noto Serif SC', serif;
+            font-size: 30px;
+            font-weight: 700;
+            letter-spacing: 0;
+            text-shadow: none;
+        }
+
+        #header .subtitle {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 13px;
+            letter-spacing: 0;
+        }
+
+        .header-mark {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--pine-soft);
+            font-size: 12px;
+            letter-spacing: 0;
+            white-space: nowrap;
+        }
+
+        .header-seal {
+            display: grid;
+            width: 40px;
+            height: 40px;
+            place-items: center;
+            border: 1px solid rgba(180, 91, 69, 0.55);
+            border-radius: 50%;
+            color: var(--cinnabar);
+            font-family: Georgia, serif;
+            font-size: 18px;
+            transform: rotate(-7deg);
+        }
+
+        #container {
+            display: flex;
+            gap: 16px;
+            height: calc(100vh - 88px);
+            padding: 16px;
+        }
+
+        #sidebar {
+            width: 382px;
+            flex: 0 0 382px;
+            padding: 14px;
+            overflow-y: auto;
+            color: var(--ink);
+            background: rgba(249, 246, 237, 0.9);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(16px);
+        }
+
+        #sidebar::-webkit-scrollbar {
+            width: 7px;
+        }
+
+        #sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #sidebar::-webkit-scrollbar-thumb {
+            background: rgba(86, 120, 100, 0.35);
+            border-radius: 4px;
+        }
+
+        .section {
+            margin-bottom: 12px;
+            padding: 17px;
+            background: rgba(255, 253, 247, 0.72);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            box-shadow: 0 5px 18px rgba(70, 57, 40, 0.05);
+        }
+
+        .section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section:hover {
+            background: rgba(255, 253, 247, 0.9);
+            border-color: rgba(86, 120, 100, 0.38);
+        }
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            color: var(--pine);
+            font-family: Georgia, 'Times New Roman', 'Noto Serif SC', serif;
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        .section-title::before {
+            content: '✦';
+            color: var(--cinnabar);
+            font-family: Georgia, serif;
+            font-size: 13px;
+        }
+
+        .retrieval-selector label,
+        .field-label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--muted);
+            font-size: 12px;
+            letter-spacing: 0;
+        }
+
+        .retrieval-selector select,
+        #question-input,
+        #search-box {
+            width: 100%;
+            color: var(--ink);
+            background: rgba(238, 233, 220, 0.78);
+            border: 1px solid rgba(70, 91, 76, 0.25);
+            border-radius: 6px;
+            font-family: inherit;
+        }
+
+        .retrieval-selector select {
+            padding: 9px 10px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .retrieval-selector option {
+            color: var(--ink);
+            background: var(--paper);
+        }
+
+        #question-input {
+            min-height: 92px;
+            margin: 12px 0 10px;
+            padding: 11px 12px;
+            font-size: 14px;
+            line-height: 1.55;
+            resize: vertical;
+        }
+
+        #search-box {
+            padding: 10px 12px;
+            font-size: 14px;
+        }
+
+        .retrieval-selector select:focus,
+        #question-input:focus,
+        #search-box:focus {
+            outline: 2px solid rgba(86, 120, 100, 0.22);
+            border-color: var(--pine-soft);
+        }
+
+        #ask-button {
+            display: flex;
+            width: 100%;
+            min-height: 42px;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 14px;
+            color: #fffdf7;
+            background: var(--pine);
+            border: 1px solid var(--pine);
+            border-radius: 6px;
+            box-shadow: 0 8px 18px rgba(41, 72, 59, 0.2);
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #ask-button::before {
+            content: '⌕';
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        #ask-button:hover {
+            background: #355d4a;
+            box-shadow: 0 10px 22px rgba(41, 72, 59, 0.27);
+            transform: translateY(-1px);
+        }
+
+        #ask-button:disabled {
+            background: #86948b;
+            border-color: #86948b;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .quick-prompts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 11px;
+        }
+
+        .quick-prompt {
+            padding: 5px 8px;
+            color: var(--pine-soft);
+            background: rgba(136, 162, 134, 0.12);
+            border: 1px solid rgba(86, 120, 100, 0.22);
+            border-radius: 999px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        .quick-prompt:hover {
+            color: #fffdf7;
+            background: var(--pine-soft);
+        }
+
+        .answer-box,
+        #answer-box {
+            max-height: 310px;
+            margin-top: 14px;
+            padding: 14px;
+            color: var(--ink);
+            background: rgba(238, 233, 220, 0.72);
+            border: 1px solid rgba(70, 91, 76, 0.16);
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        .answer-label {
+            margin-bottom: 7px;
+            color: var(--cinnabar);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0;
+        }
+
+        .answer-meta,
+        .answer-graph-summary {
+            margin-top: 10px;
+            color: var(--muted) !important;
+            font-size: 11px;
+        }
+
+        .answer-graph-summary {
+            color: var(--pine-soft) !important;
+        }
+
+        .loading-spinner {
+            border-color: rgba(41, 72, 59, 0.2);
+            border-top-color: var(--cinnabar);
+        }
+
+        .stat {
+            margin-bottom: 7px;
+            padding: 9px 10px;
+            background: rgba(238, 233, 220, 0.66);
+            border: 1px solid rgba(70, 91, 76, 0.1);
+            border-radius: 6px;
+        }
+
+        .stat-label,
+        .legend-label {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .stat-value {
+            color: var(--cinnabar);
+            font-size: 14px;
+        }
+
+        .legend {
+            gap: 5px;
+        }
+
+        .legend-item {
+            padding: 7px 9px;
+            background: rgba(238, 233, 220, 0.55);
+            border-radius: 6px;
+        }
+
+        .legend-item:hover {
+            background: rgba(136, 162, 134, 0.16);
+            transform: translateX(3px);
+        }
+
+        .legend-color {
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(38, 53, 45, 0.25);
+        }
+
+        .legend-count {
+            color: var(--muted);
+            background: rgba(86, 120, 100, 0.12);
+        }
+
+        #graph-container {
+            flex: 1;
+            min-width: 0;
+            position: relative;
+            overflow: hidden;
+            background: rgba(246, 242, 232, 0.82);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(8px);
+        }
+
+        #graph-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            background-image: url('./assets/materia-medica-apothecary.png');
+            background-position: center 53%;
+            background-size: cover;
+            background-repeat: no-repeat;
+            opacity: 0.22;
+            filter: saturate(0.82) sepia(0.08) contrast(0.94);
+            pointer-events: none;
+        }
+
+        #graph-container::after {
+            content: '本草关系 · 证据子图';
+            position: absolute;
+            right: 22px;
+            bottom: 18px;
+            z-index: 2;
+            color: rgba(41, 72, 59, 0.42);
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: 12px;
+            letter-spacing: 0;
+            pointer-events: none;
+        }
+
+        #status {
+            top: 18px;
+            left: 18px;
+            padding: 7px 12px;
+            color: var(--pine-soft);
+            background: rgba(249, 246, 237, 0.84);
+            border: 1px solid rgba(86, 120, 100, 0.24);
+            border-radius: 999px;
+            box-shadow: 0 5px 14px rgba(70, 57, 40, 0.08);
+            font-size: 12px;
+        }
+
+        #loading {
+            color: var(--cinnabar);
+        }
+
+        #empty-hint {
+            color: rgba(41, 72, 59, 0.66);
+            font-family: Georgia, 'Times New Roman', 'Noto Serif SC', serif;
+            font-size: 17px;
+        }
+
+        #details-panel {
+            top: 74px;
+            left: 18px;
+            max-width: 320px;
+            color: var(--ink);
+            background: rgba(249, 246, 237, 0.92);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            box-shadow: var(--shadow);
+        }
+
+        .zoom-controls {
+            top: 18px;
+            right: 18px;
+            gap: 7px;
+        }
+
+        .zoom-btn {
+            width: 38px;
+            height: 38px;
+            color: var(--pine);
+            background: rgba(249, 246, 237, 0.86);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            box-shadow: 0 5px 14px rgba(70, 57, 40, 0.09);
+        }
+
+        .zoom-btn:hover {
+            color: #fffdf7;
+            background: var(--pine-soft);
+            border-color: var(--pine-soft);
+            transform: translateY(-1px);
+        }
+
+        .node circle {
+            stroke: #fffdf7;
+            stroke-width: 2px;
+            filter: drop-shadow(0 2px 3px rgba(38, 53, 45, 0.22));
+        }
+
+        .node text {
+            fill: var(--ink);
+            text-shadow: 0 1px 3px rgba(249, 246, 237, 0.95);
+        }
+
+        .node:hover circle {
+            stroke: var(--cinnabar);
+        }
+
+        .node.highlighted circle,
+        .link.highlighted {
+            stroke: var(--cinnabar);
+            filter: drop-shadow(0 0 6px rgba(180, 91, 69, 0.48));
+        }
+
+        .link {
+            stroke: rgba(41, 72, 59, 0.42);
+        }
+
+        .link-label {
+            fill: rgba(41, 72, 59, 0.68);
+        }
+
+        #leaf-trail {
+            position: fixed;
+            inset: 0;
+            z-index: 999;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+        }
+
+        @media (max-width: 820px) {
+            body {
+                overflow: auto;
+                background-attachment: scroll;
+            }
+
+            #header {
+                min-height: 76px;
+                padding: 14px 18px;
+            }
+
+            #header .subtitle {
+                max-width: 260px;
+                font-size: 11px;
+            }
+
+            #header h1 {
+                font-size: 24px;
+            }
+
+            .header-mark {
+                display: none;
+            }
+
+            #container {
+                display: block;
+                height: auto;
+                padding: 10px;
+            }
+
+            #sidebar {
+                width: 100%;
+                max-height: none;
+                margin-bottom: 10px;
+            }
+
+            #graph-container {
+                height: 64vh;
+                min-height: 430px;
+            }
+
+            #graph-container::after {
+                right: 12px;
+                bottom: 12px;
+            }
+
+            #graph-container::before {
+                background-position: center 48%;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+            }
+
+            #leaf-trail {
+                display: none;
+            }
+        }
+    </style>
 </head>
 <body>
     <div id="header">
-        <h1>🌿 中药学 GraphRAG</h1>
-        <div class="subtitle">知识图谱问答系统 · 默认仅展示问答相关子图</div>
+        <div>
+            <h1>🌿 中药学 GraphRAG</h1>
+            <div class="subtitle">本草知识图谱 · 证据优先的问答与关系探索</div>
+        </div>
+        <div class="header-mark"><span class="header-seal">药</span><span>仁心求本<br>格物致知</span></div>
     </div>
 
     <div id="container">
@@ -441,24 +1000,30 @@
             <div class="section">
                 <div class="section-title">GraphRAG 问答</div>
                 <div class="retrieval-selector">
-                    <label for="retrieval-method">检索方式:</label>
+                    <label for="retrieval-method">检索路径</label>
                     <select id="retrieval-method">
-                        <option value="kg_v2" selected>证据知识图谱 v2（类型化+页码溯源）</option>
-                        <option value="keyword_graph">中文混合向量+图谱</option>
-                        <option value="vector">向量检索 (VectorRetriever)</option>
-                        <option value="vector_cypher">向量+图遍历 (VectorCypherRetriever)</option>
-                        <option value="hybrid">混合检索 (HybridRetriever)</option>
-                        <option value="hybrid_cypher">混合+图遍历 (HybridCypherRetriever)</option>
+                        <option value="auto" selected>自动意图路由（推荐）</option>
+                        <option value="kg_v2">证据知识图谱 v2（自动路由兼容入口）</option>
+                        <option value="keyword_graph">全文检索 + 受限图谱</option>
+                        <option value="vector">向量检索</option>
+                        <option value="vector_cypher">向量+图遍历</option>
+                        <option value="hybrid">混合检索</option>
+                        <option value="hybrid_cypher">混合+图遍历</option>
                     </select>
                 </div>
-                <textarea id="question-input" placeholder="例如：影响中药贮藏变异的外界因素有哪些？"></textarea>
+                <textarea id="question-input" placeholder="例如：人参的性味、归经和功效是什么？"></textarea>
                 <button id="ask-button">提问</button>
+                <div class="quick-prompts" aria-label="常用问题">
+                    <button type="button" class="quick-prompt" data-question="人参的性味、归经和功效是什么？">人参 · 属性</button>
+                    <button type="button" class="quick-prompt" data-question="哪些中药具有大补元气的功效？">功效 · 反查</button>
+                    <button type="button" class="quick-prompt" data-question="比较人参和黄芪的功效异同。">人参 / 黄芪</button>
+                </div>
                 <div id="answer-box"></div>
             </div>
 
             <div class="section">
                 <div class="section-title">搜索</div>
-                <input type="text" id="search-box" placeholder="搜索实体...">
+                    <input type="text" id="search-box" placeholder="搜索药名、功效或经脉...">
             </div>
 
             <div class="section">
@@ -478,14 +1043,14 @@
             <div class="section">
                 <div class="section-title">实体类型</div>
                 <div class="legend" id="legend"></div>
-                <div style="margin-top: 8px; font-size: 12px; color: #90a4ae;">启动显示全库统计；提问后切换为当前子图类型</div>
+                <div style="margin-top: 8px; font-size: 12px; color: #6b756d;">启动显示全库统计；提问后切换为当前子图类型</div>
             </div>
         </div>
 
         <div id="graph-container">
             <div id="status">连接中...</div>
             <div id="loading">加载中...</div>
-            <div id="empty-hint">暂不加载全图，避免卡顿<br>请在左侧提问，这里会显示相关子图</div>
+            <div id="empty-hint">暂不加载全图，避免卡顿<br>在左侧问一味药，让本草关系显形</div>
             <div id="details-panel"></div>
             <div class="zoom-controls">
                 <button class="zoom-btn" id="zoom-in" title="放大">+</button>
@@ -495,6 +1060,7 @@
             <svg id="graph"></svg>
         </div>
     </div>
+    <canvas id="leaf-trail" aria-hidden="true"></canvas>
 
     <script>
         const API_BASE = '/api';
@@ -505,22 +1071,22 @@
 
         // Color scheme for different entity types
         const colorScheme = {
-            '中药': '#2e7d32',
-            '功效': '#66bb6a',
-            '主治': '#ef6c00',
-            '性味': '#8d6e63',
-            '归经': '#5e35b1',
-            '用法用量': '#00838f',
-            '禁忌': '#c62828',
-            '配伍': '#1565c0',
-            '药材来源': '#6d4c41',
-            '炮制': '#ad8b00',
-            '化学成分': '#455a64',
-            '方剂': '#7b1fa2',
-            '典籍': '#0277bd',
-            '人物': '#d81b60',
-            '概念': '#78909c',
-            'default': '#95a5a6'
+            '中药': '#47745a',
+            '功效': '#bd8c45',
+            '主治': '#b45b45',
+            '性味': '#947050',
+            '归经': '#687f6d',
+            '用法用量': '#8b6a46',
+            '禁忌': '#a34f45',
+            '配伍': '#5b7c72',
+            '药材来源': '#806247',
+            '炮制': '#a8833f',
+            '化学成分': '#64716a',
+            '方剂': '#7a5e55',
+            '典籍': '#54736d',
+            '人物': '#9c6253',
+            '概念': '#778277',
+            'default': '#7d887e'
         };
 
         function getNodeColor(type) {
@@ -578,7 +1144,7 @@
                 .attr('markerHeight', 6)
                 .append('path')
                 .attr('d', 'M 0,-5 L 10,0 L 0,5')
-                .attr('fill', '#90a4ae');
+                .attr('fill', '#567864');
 
             // Create zoom behavior
             zoom = d3.zoom()
@@ -737,10 +1303,10 @@
                 const response = await fetch(`${API_BASE}/health`);
                 const data = await response.json();
                 document.getElementById('status').textContent = data.status === 'ok' ? '✓ 已连接' : '✗ 连接失败';
-                document.getElementById('status').style.color = data.status === 'ok' ? '#4fc3f7' : '#f44336';
+                document.getElementById('status').style.color = data.status === 'ok' ? '#567864' : '#a34f45';
             } catch (error) {
                 document.getElementById('status').textContent = '✗ 无法连接';
-                document.getElementById('status').style.color = '#f44336';
+                document.getElementById('status').style.color = '#a34f45';
             }
         }
 
@@ -797,7 +1363,9 @@
                 if (response.ok) {
                     // Display answer
                     const methodLabel = {
-                        'keyword_graph': 'BM25+中文向量+受限图谱（推荐）',
+                        'auto': `自动路由${data.intent ? ` · ${data.intent}` : ''}`,
+                        'kg_v2': `证据图谱${data.intent ? ` · ${data.intent}` : ''}`,
+                        'keyword_graph': 'BM25+受限图谱（推荐）',
                         'vector': '向量检索',
                         'vector_cypher': '向量+图遍历',
                         'hybrid': '混合检索',
@@ -811,8 +1379,8 @@
                     answerBox.innerHTML = `
                         <div class="answer-label">回答 (${methodLabel}):</div>
                         <div>${data.answer}</div>
-                        ${data.sources ? `<div style="margin-top: 10px; color: #b0bec5;">命中教材页：${data.sources.map(s => s.page_start === s.page_end ? s.page_start : `${s.page_start}-${s.page_end}`).join('、')}</div>` : ''}
-                        <div style="margin-top: 10px; color: #4fc3f7;">右侧展示相关子图：${nodeCount} 个节点，${edgeCount} 条关系</div>
+                        ${data.sources ? `<div class="answer-meta">命中教材页：${data.sources.map(s => s.page_start === s.page_end ? s.page_start : `${s.page_start}-${s.page_end}`).join('、')}</div>` : ''}
+                        <div class="answer-graph-summary">右侧展示相关子图：${nodeCount} 个节点，${edgeCount} 条关系</div>
                     `;
 
                     // Render only the answer subgraph (never the full graph)
@@ -822,15 +1390,23 @@
                         updateGraph({ nodes: [], edges: [] });
                     }
                 } else {
-                    answerBox.innerHTML = `<div style="color: #f44336;">错误: ${data.error || '请求失败'}</div>`;
+                    answerBox.innerHTML = `<div style="color: #a34f45;">错误: ${data.error || '请求失败'}</div>`;
                 }
             } catch (error) {
                 console.error('Error asking question:', error);
-                answerBox.innerHTML = `<div style="color: #f44336;">错误: ${error.message}</div>`;
+                answerBox.innerHTML = `<div style="color: #a34f45;">错误: ${error.message}</div>`;
             } finally {
                 askButton.disabled = false;
                 askButton.textContent = '提问';
             }
+        });
+
+        document.querySelectorAll('.quick-prompt').forEach((prompt) => {
+            prompt.addEventListener('click', () => {
+                const input = document.getElementById('question-input');
+                input.value = prompt.dataset.question || '';
+                input.focus();
+            });
         });
 
         // Search: show matched entities as a small graph instead of scanning a full canvas
@@ -858,6 +1434,98 @@
                 }
             }, 250);
         });
+
+        // A quiet leaf trail gives the interface a tactile herbal signature without
+        // competing with the graph. It is disabled automatically for reduced motion.
+        const leafCanvas = document.getElementById('leaf-trail');
+        const leafContext = leafCanvas.getContext('2d');
+        const leaves = [];
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        let leafLastPoint = null;
+        let leafLastSpawn = 0;
+
+        function resizeLeafCanvas() {
+            const ratio = Math.min(window.devicePixelRatio || 1, 2);
+            leafCanvas.width = Math.floor(window.innerWidth * ratio);
+            leafCanvas.height = Math.floor(window.innerHeight * ratio);
+            leafCanvas.style.width = `${window.innerWidth}px`;
+            leafCanvas.style.height = `${window.innerHeight}px`;
+            leafContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+        }
+
+        function spawnLeaf(x, y, now) {
+            if (now - leafLastSpawn < 38) return;
+            leafLastSpawn = now;
+            const from = leafLastPoint || { x, y };
+            const distance = Math.hypot(x - from.x, y - from.y);
+            leafLastPoint = { x, y };
+            if (distance < 3) return;
+            leaves.push({
+                x: x + (Math.random() - 0.5) * 7,
+                y: y + (Math.random() - 0.5) * 7,
+                vx: (Math.random() - 0.5) * 0.18,
+                vy: -0.12 - Math.random() * 0.22,
+                rotation: Math.atan2(y - from.y, x - from.x) + (Math.random() - 0.5) * 1.7,
+                spin: (Math.random() - 0.5) * 0.012,
+                size: 4 + Math.random() * 4,
+                age: 0,
+                life: 660 + Math.random() * 340,
+                color: Math.random() > 0.25 ? '82, 120, 92' : '180, 91, 69'
+            });
+            if (leaves.length > 90) leaves.splice(0, leaves.length - 90);
+        }
+
+        function drawLeaf(leaf, progress) {
+            const opacity = Math.max(0, 0.42 * (1 - progress) * (1 - progress));
+            const size = leaf.size * (1 - progress * 0.12);
+            leafContext.save();
+            leafContext.translate(leaf.x, leaf.y);
+            leafContext.rotate(leaf.rotation);
+            leafContext.scale(1, 0.62);
+            leafContext.fillStyle = `rgba(${leaf.color}, ${opacity})`;
+            leafContext.beginPath();
+            leafContext.moveTo(0, 0);
+            leafContext.bezierCurveTo(size * 0.45, -size * 1.1, size * 1.35, -size * 0.85, size * 1.55, 0);
+            leafContext.bezierCurveTo(size * 1.1, size * 0.85, size * 0.35, size * 0.82, 0, 0);
+            leafContext.fill();
+            leafContext.strokeStyle = `rgba(${leaf.color}, ${opacity * 0.85})`;
+            leafContext.lineWidth = 0.7;
+            leafContext.beginPath();
+            leafContext.moveTo(0, 0);
+            leafContext.lineTo(size * 1.35, -size * 0.05);
+            leafContext.stroke();
+            leafContext.restore();
+        }
+
+        function animateLeaves(timestamp) {
+            leafContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+            for (let index = leaves.length - 1; index >= 0; index -= 1) {
+                const leaf = leaves[index];
+                leaf.age += 16;
+                leaf.x += leaf.vx;
+                leaf.y += leaf.vy;
+                leaf.vy -= 0.002;
+                leaf.rotation += leaf.spin;
+                const progress = leaf.age / leaf.life;
+                if (progress >= 1) {
+                    leaves.splice(index, 1);
+                    continue;
+                }
+                drawLeaf(leaf, progress);
+            }
+            if (!reduceMotion) requestAnimationFrame(animateLeaves);
+        }
+
+        resizeLeafCanvas();
+        if (!reduceMotion) {
+            window.addEventListener('pointermove', (event) => {
+                if (event.pointerType === 'touch') return;
+                spawnLeaf(event.clientX, event.clientY, performance.now());
+            }, { passive: true });
+            window.addEventListener('pointerleave', () => { leafLastPoint = null; }, { passive: true });
+            requestAnimationFrame(animateLeaves);
+        }
+        window.addEventListener('resize', resizeLeafCanvas, { passive: true });
 
         // Initialize: stats only, no full-graph download
         initGraph();

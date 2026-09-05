@@ -10,9 +10,10 @@ Assertion 层的逐字原句（SKILL §3.1 证据优先）。
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
-from ..domain.ontology import Ontology
+from ..domain.ontology import Ontology, load_ontology
 from .neo4j_store import Neo4jStore
 from .runs import get_active_run
 
@@ -35,7 +36,11 @@ CARD_SLOT_ORDER: tuple[str, ...] = (
 
 _FIND_HERB = """
 MATCH (e:Entity {entity_type: 'HERB'})
-WHERE e.run_id = $run AND (e.preferred_name = $name OR $name IN e.aliases)
+WHERE (e.preferred_name = $name OR $name IN coalesce(e.aliases, []))
+  AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[serving]-()
+    WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
+  })
 RETURN e.canonical_id AS canonical_id, e.preferred_name AS name, e.aliases AS aliases
 LIMIT 1
 """
@@ -52,23 +57,95 @@ ORDER BY e.best_support_score DESC
 
 _REVERSE = """
 MATCH (target:Entity)
-WHERE target.run_id = $run AND target.entity_type IN ['EFFICACY', 'INDICATION']
-  AND (target.preferred_name = $name OR $name IN target.aliases)
+WHERE target.entity_type IN ['EFFICACY', 'INDICATION']
+  AND (target.preferred_name = $name OR $name IN coalesce(target.aliases, []))
 MATCH (h:Entity {entity_type: 'HERB'})-[e]->(target)
 WHERE e.fact_key IS NOT NULL AND e.active_run_id = $run
 RETURN h.preferred_name AS herb, h.canonical_id AS herb_id, type(e) AS predicate,
        e.evidence_count AS evidence_count, e.page_start AS page_start,
-       e.best_support_score AS score
+       e.page_end AS page_end, e.best_support_score AS score,
+       e.evidence_ids AS evidence_ids, e.fact_key AS fact_key,
+       target.canonical_id AS target_id
 ORDER BY e.evidence_count DESC, e.best_support_score DESC
 LIMIT $limit
 """
 
 _EVIDENCE = """
 MATCH (a:Assertion) WHERE a.assertion_id IN $ids
+OPTIONAL MATCH (a)-[:SUBJECT]->(subject:Entity)
+OPTIONAL MATCH (a)-[:OBJECT]->(object:Entity)
+OPTIONAL MATCH (a)-[:EVIDENCED_BY]->(chunk:Chunk)
+WITH a, subject, object, collect(DISTINCT chunk.chunk_id) AS chunk_ids
 RETURN a.assertion_id AS assertion_id, a.evidence_quote AS quote,
-       a.page_start AS page_start, a.match_mode AS match_mode,
-       a.predicate AS predicate
+       a.page_start AS page_start, a.page_end AS page_end,
+       a.match_mode AS match_mode, a.predicate AS predicate,
+       a.fact_key AS fact_key, subject.canonical_id AS subject_id,
+       object.canonical_id AS object_id, chunk_ids,
+       a.final_score AS support_score, a.qualifiers_json AS qualifiers_json,
+       subject.preferred_name AS subject_name,
+       object.preferred_name AS object_name
 ORDER BY a.final_score DESC
+"""
+
+_INTERSECTION = """
+UNWIND $constraint_ids AS constraint_id
+MATCH (target:Entity {canonical_id: constraint_id})
+MATCH (h:Entity {entity_type: 'HERB'})-[e]->(target)
+WHERE e.fact_key IS NOT NULL AND e.active_run_id = $run
+  AND type(e) IN ['HAS_EFFICACY', 'TREATS']
+WITH h,
+     collect(DISTINCT {
+       target_id: target.canonical_id, target_name: target.preferred_name,
+       target_type: target.entity_type, predicate: type(e)
+     }) AS matches,
+     collect(DISTINCT e) AS edges
+WITH h, matches,
+     [match IN matches | match.target_id] AS matched_ids,
+     [match IN matches | match.target_name] AS matched_names,
+     reduce(ids = [], edge IN edges | ids + coalesce(edge.evidence_ids, [])) AS evidence_ids,
+     [edge IN edges WHERE edge.page_start IS NOT NULL | edge.page_start] AS pages,
+     reduce(best = 0.0, edge IN edges |
+       CASE WHEN coalesce(edge.best_support_score, 0.0) > best
+            THEN edge.best_support_score ELSE best END) AS best_score
+RETURN h.preferred_name AS herb, h.canonical_id AS herb_id,
+       matches, matched_ids, matched_names, evidence_ids, pages, best_score
+ORDER BY size(matched_ids) DESC, best_score DESC, herb
+LIMIT $limit
+"""
+
+_ENTITY_FACTS = """
+UNWIND $entity_ids AS entity_id
+MATCH (subject:Entity {canonical_id: entity_id})-[edge]->(object:Entity)
+WHERE edge.fact_key IS NOT NULL AND edge.active_run_id = $run
+UNWIND coalesce(edge.evidence_ids, []) AS evidence_id
+MATCH (a:Assertion {assertion_id: evidence_id})
+OPTIONAL MATCH (a)-[:EVIDENCED_BY]->(chunk:Chunk)
+WITH subject, edge, object, a, collect(DISTINCT chunk) AS chunks
+RETURN subject.canonical_id AS subject_id, subject.preferred_name AS subject_name,
+       type(edge) AS predicate, object.canonical_id AS object_id,
+       object.preferred_name AS object_name, object.entity_type AS object_type,
+       edge.fact_key AS fact_key,
+       a.assertion_id AS evidence_id, a.evidence_quote AS quote,
+       a.page_start AS page_start, a.page_end AS page_end,
+       [chunk IN chunks | chunk.chunk_id] AS chunk_ids,
+       a.final_score AS support_score,
+       a.qualifiers_json AS qualifiers_json,
+       head(chunks).section_path AS section_path
+ORDER BY subject_id, predicate, support_score DESC
+LIMIT $limit
+"""
+
+_ENTITY_SECTIONS = """
+UNWIND $entity_ids AS entity_id
+MATCH (entity:Entity {canonical_id: entity_id})
+MATCH (assertion:Assertion {run_id: $run})-[:SUBJECT]->(entity)
+WHERE assertion.validation_status = 'ACCEPTED'
+MATCH (assertion)-[:EVIDENCED_BY]->(chunk:Chunk)
+RETURN DISTINCT entity.canonical_id AS entity_id,
+       entity.preferred_name AS entity_name, chunk.chunk_id AS chunk_id,
+       chunk.text AS text, chunk.page_start AS page_start,
+       chunk.page_end AS page_end, chunk.section_path AS section_path
+LIMIT $limit
 """
 
 _SUBGRAPH = """
@@ -198,8 +275,13 @@ def get_herb_card(
 # 同为 2 字，会把真正的中药挤出 LIMIT。
 _LINK_IN_TEXT = """
 MATCH (e:Entity)
-WHERE e.run_id = $run AND e.entity_type IN $types AND size(e.preferred_name) >= 2
-  AND $text CONTAINS e.preferred_name
+WHERE e.entity_type IN $types
+  AND any(surface IN [e.preferred_name] + coalesce(e.aliases, [])
+          WHERE surface IS NOT NULL AND size(surface) >= 2 AND $text CONTAINS surface)
+  AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[serving]-()
+    WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
+  })
 RETURN e.canonical_id AS canonical_id, e.preferred_name AS name,
        e.entity_type AS entity_type, size(e.preferred_name) AS len,
        CASE e.entity_type WHEN 'HERB' THEN 0 ELSE 1 END AS type_rank
@@ -229,11 +311,143 @@ def find_herbs_by_effect(
     return store.run(_REVERSE, name=name.strip(), run=run_id, limit=limit)
 
 
+def find_herbs_by_constraints(
+    store: Neo4jStore,
+    constraint_ids: list[str],
+    *,
+    run_id: str,
+    limit: int = 25,
+) -> list[dict]:
+    """Find herbs matching all constraints first, followed by partial coverage.
+
+    This is a hard neighborhood intersection. Partial rows are explicitly marked and are
+    never promoted to asserted facts.
+    """
+    unique_ids = list(dict.fromkeys(item for item in constraint_ids if item))
+    if len(unique_ids) < 2:
+        raise ValueError("at least two different constraint ids are required")
+    rows = store.run(
+        _INTERSECTION,
+        constraint_ids=unique_ids,
+        constraint_count=len(unique_ids),
+        run=run_id,
+        limit=limit,
+    )
+    for row in rows:
+        matched = len(set(row.get("matched_ids") or []))
+        row["coverage"] = matched / len(unique_ids)
+        row["exact_match"] = matched == len(unique_ids)
+    return rows
+
+
+def load_entity_facts(
+    store: Neo4jStore,
+    entity_ids: list[str],
+    *,
+    run_id: str,
+    limit: int = 120,
+) -> list[dict]:
+    """Load evidence-backed outgoing facts for comparison map/reduce."""
+    unique_ids = list(dict.fromkeys(item for item in entity_ids if item))
+    if not unique_ids:
+        return []
+    return _decode_qualifiers(
+        store.run(_ENTITY_FACTS, entity_ids=unique_ids, run=run_id, limit=limit)
+    )
+
+
+def load_entity_sections(
+    store: Neo4jStore,
+    entity_ids: list[str],
+    *,
+    run_id: str,
+    limit: int = 80,
+) -> list[dict]:
+    """Load provenance chunks for evidence-backed, extractive comparison summaries."""
+    unique_ids = list(dict.fromkeys(item for item in entity_ids if item))
+    if not unique_ids:
+        return []
+    return store.run(
+        _ENTITY_SECTIONS, entity_ids=unique_ids, run=run_id, limit=limit
+    )
+
+
+def find_supported_paths(
+    store: Neo4jStore,
+    start_id: str,
+    end_id: str,
+    *,
+    run_id: str,
+    allowed_predicates: list[str] | None = None,
+    max_hops: int = 3,
+    limit: int = 20,
+) -> list[dict]:
+    """Return short evidence-backed paths over domain serving edges only."""
+    if start_id == end_id:
+        raise ValueError("path endpoints must be different")
+    schema_predicates = tuple(load_ontology().predicates)
+    requested = tuple(allowed_predicates or schema_predicates)
+    allowed = [item for item in requested if item in schema_predicates]
+    if not allowed:
+        raise ValueError("allowed_predicates must contain a domain predicate")
+    hops = max(1, min(int(max_hops), 3))
+    query = f"""
+MATCH path = (start:Entity {{canonical_id: $start_id}})
+             -[rels*1..{hops}]-(end:Entity {{canonical_id: $end_id}})
+WHERE all(node IN nodes(path) WHERE node:Entity)
+  AND all(node IN nodes(path)
+          WHERE single(candidate IN nodes(path) WHERE candidate = node))
+  AND all(rel IN relationships(path) WHERE type(rel) IN $allowed_predicates
+          AND rel.fact_key IS NOT NULL
+          AND rel.active_run_id = $run
+          AND size(coalesce(rel.evidence_ids, [])) > 0)
+RETURN [node IN nodes(path) | {{id: node.canonical_id, name: node.preferred_name,
+                                type: node.entity_type}}] AS nodes,
+       [rel IN relationships(path) | type(rel)] AS predicates,
+       [rel IN relationships(path) | startNode(rel).canonical_id] AS edge_source_ids,
+       [rel IN relationships(path) | endNode(rel).canonical_id] AS edge_target_ids,
+       [rel IN relationships(path) | rel.fact_key] AS fact_keys,
+       [rel IN relationships(path) | rel.evidence_ids] AS evidence_id_groups,
+       [rel IN relationships(path) | rel.page_start] AS pages,
+       [rel IN relationships(path) | coalesce(rel.best_support_score, 0.0)] AS edge_scores
+ORDER BY reduce(total = 0.0, rel IN relationships(path) |
+                  total + coalesce(rel.best_support_score, 0.0)) / length(path) DESC,
+         length(path) ASC
+LIMIT $limit
+"""
+    return store.run(
+        query,
+        start_id=start_id,
+        end_id=end_id,
+        run=run_id,
+        allowed_predicates=allowed,
+        limit=limit,
+    )
+
+
 def load_evidence(store: Neo4jStore, assertion_ids: list[str]) -> list[dict]:
     """Fetch verbatim evidence quotes for a set of assertions."""
     if not assertion_ids:
         return []
-    return store.run(_EVIDENCE, ids=assertion_ids)
+    return _decode_qualifiers(store.run(_EVIDENCE, ids=assertion_ids))
+
+
+def _decode_qualifiers(rows: list[dict]) -> list[dict]:
+    """Decode the JSON property used by the persisted Assertion schema."""
+    decoded: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        raw = item.pop("qualifiers_json", None)
+        if raw is not None:
+            try:
+                value = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, json.JSONDecodeError):
+                value = {}
+            item["qualifiers"] = value if isinstance(value, dict) else {}
+        else:
+            item.setdefault("qualifiers", {})
+        decoded.append(item)
+    return decoded
 
 
 def card_to_context(card: HerbCard, evidence: list[dict]) -> tuple[str, list[dict]]:

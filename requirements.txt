@@ -5,6 +5,7 @@ neo4j-graphrag>=1.19,<2
 networkx>=3.4,<4
 numpy>=2,<3
 openai>=3,<4
+pydantic>=2.12,<3
 python-dotenv>=1.1,<2
 pyvis>=0.3,<1
 PyMuPDF>=1.27,<2
