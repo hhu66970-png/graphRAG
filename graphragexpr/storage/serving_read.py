@@ -290,6 +290,46 @@ LIMIT $limit
 """
 
 
+_LONGER_ENTITY_IN_TEXT = """
+MATCH (e:Entity)
+WHERE e.preferred_name IS NOT NULL
+  AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[serving]-()
+    WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
+  })
+  AND any(surface IN [e.preferred_name] + coalesce(e.aliases, [])
+          WHERE surface IS NOT NULL
+            AND size(surface) > size($name)
+            AND surface CONTAINS $name
+            AND $text CONTAINS surface)
+RETURN e.canonical_id AS canonical_id, e.entity_type AS entity_type,
+       e.preferred_name AS preferred_name
+ORDER BY size(e.preferred_name) DESC
+LIMIT $limit
+"""
+
+
+def find_longer_entity_mentions(
+    store: Neo4jStore, text: str, *, name: str, run_id: str, limit: int = 5,
+) -> list[dict]:
+    """问题里是否出现了**比 `name` 更长、且包含 `name`** 的已知实体名。
+
+    用途有限且明确：高风险服务层核对「用户指定的对象是否已被**完整**识别」。
+    链接器按「问题文本包含实体名」匹配，于是「安宫牛黄丸」会把子串「牛黄」
+    当成问题的主语，接着用牛黄的禁忌去回答安宫牛黄丸的问题。
+
+    本函数只报告「存在更长匹配」这一事实，**不重做消歧、不改动链接结果、
+    不返回替代主语**——是否拒绝使用该证据由服务层决定。
+    未收录的复方名（如本体里没有的「龙胆泻肝丸」）查不到更长匹配，
+    这类对象错配由适用性核验的**条件**检查兜住。
+
+    Side effects: 只读。
+    """
+    return store.run(
+        _LONGER_ENTITY_IN_TEXT, text=text, name=name, run=run_id, limit=limit
+    )
+
+
 def link_entities_in_text(
     store: Neo4jStore, text: str, *, run_id: str,
     types: tuple[str, ...] = ("HERB", "EFFICACY", "INDICATION"), limit: int = 8,

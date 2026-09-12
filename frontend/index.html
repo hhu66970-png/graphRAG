@@ -595,11 +595,338 @@
         }
 
         #empty-hint {
-            color: rgba(51, 51, 51, 0.62);
+            position: absolute;
+            top: auto;
+            bottom: 18px;
+            left: 50%;
+            transform: translate(-50%, 0);
+            z-index: 4;
+            text-align: center;
+            pointer-events: none;
+            color: rgba(61, 106, 79, 0.62);
             font-family: var(--serif);
-            font-size: 16px;
-            line-height: 1.8;
-            padding: 0 24px;
+            font-size: 13px;
+            line-height: 1.7;
+            padding: 6px 18px;
+            border-radius: 999px;
+            background: rgba(252, 250, 245, 0.65);
+        }
+
+        /* 空态演示图谱：中央「中药学」印章 + 四周常见药材的循环动画 */
+        #demo-graph {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        #demo-graph .demo-orbit {
+            fill: none;
+            stroke: rgba(61, 106, 79, 0.14);
+            stroke-width: 1;
+            stroke-dasharray: 3 9;
+        }
+
+        #demo-graph .demo-edge {
+            fill: none;
+            stroke: rgba(61, 106, 79, 0.34);
+            stroke-width: 1.6;
+            stroke-dasharray: 6 12;
+            animation: demo-flow 2.6s linear infinite;
+        }
+
+        #demo-graph .demo-edge:nth-of-type(2) { animation-delay: -0.33s; }
+        #demo-graph .demo-edge:nth-of-type(3) { animation-delay: -0.65s; }
+        #demo-graph .demo-edge:nth-of-type(4) { animation-delay: -0.98s; }
+        #demo-graph .demo-edge:nth-of-type(5) { animation-delay: -1.3s; }
+        #demo-graph .demo-edge:nth-of-type(6) { animation-delay: -1.63s; }
+        #demo-graph .demo-edge:nth-of-type(7) { animation-delay: -1.95s; }
+        #demo-graph .demo-edge:nth-of-type(8) { animation-delay: -2.28s; }
+
+        #demo-graph .herb-node circle {
+            fill: #3D6A4F;
+            stroke: #FCFAF5;
+            stroke-width: 2;
+        }
+
+        #demo-graph .herb-node text {
+            fill: rgba(61, 106, 79, 0.78);
+            font-family: var(--serif);
+            font-size: 13px;
+        }
+
+        #demo-graph .herb-node {
+            transform-box: fill-box;
+            transform-origin: center;
+            animation: demo-float 3s ease-in-out infinite alternate;
+        }
+
+        #demo-graph .herb-node:nth-of-type(2) { animation-delay: -0.4s; }
+        #demo-graph .herb-node:nth-of-type(3) { animation-delay: -0.8s; }
+        #demo-graph .herb-node:nth-of-type(4) { animation-delay: -1.2s; }
+        #demo-graph .herb-node:nth-of-type(5) { animation-delay: -1.6s; }
+        #demo-graph .herb-node:nth-of-type(6) { animation-delay: -2s; }
+        #demo-graph .herb-node:nth-of-type(7) { animation-delay: -2.4s; }
+        #demo-graph .herb-node:nth-of-type(8) { animation-delay: -2.8s; }
+
+        #demo-graph .demo-core circle {
+            fill: #3D6A4F;
+            stroke: #FCFAF5;
+            stroke-width: 3;
+        }
+
+        #demo-graph .demo-core text {
+            fill: #FCFAF5;
+            font-family: var(--serif);
+            font-size: 21px;
+            letter-spacing: 2px;
+        }
+
+        #demo-graph .demo-core {
+            transform-box: fill-box;
+            transform-origin: center;
+            animation: demo-breathe 3.2s ease-in-out infinite alternate;
+        }
+
+        #demo-graph .demo-halo {
+            fill: rgba(61, 106, 79, 0.16);
+            transform-box: fill-box;
+            transform-origin: center;
+            animation: demo-ping 2.6s ease-out infinite;
+        }
+
+        #demo-graph .demo-particle {
+            fill: rgba(61, 106, 79, 0.24);
+            animation: demo-drift 5s ease-in-out infinite alternate;
+        }
+
+        #demo-graph .demo-particle:nth-of-type(2) { animation-delay: -1.2s; }
+        #demo-graph .demo-particle:nth-of-type(3) { animation-delay: -2.4s; }
+        #demo-graph .demo-particle:nth-of-type(4) { animation-delay: -3.6s; }
+        #demo-graph .demo-particle:nth-of-type(5) { animation-delay: -4.8s; }
+
+        #demo-ring {
+            transform-box: fill-box;
+            transform-origin: 50% 50%;
+            animation: demo-sway 11s ease-in-out infinite alternate;
+        }
+
+        @keyframes demo-flow {
+            to { stroke-dashoffset: -90; }
+        }
+
+        @keyframes demo-float {
+            from { transform: translateY(-4px); }
+            to { transform: translateY(4px); }
+        }
+
+        @keyframes demo-breathe {
+            from { transform: scale(1); }
+            to { transform: scale(1.04); }
+        }
+
+        @keyframes demo-ping {
+            0% { transform: scale(0.72); opacity: 0.6; }
+            70% { transform: scale(1.25); opacity: 0; }
+            100% { transform: scale(1.25); opacity: 0; }
+        }
+
+        @keyframes demo-drift {
+            from { transform: translate(0, 0); }
+            to { transform: translate(6px, -10px); }
+        }
+
+        @keyframes demo-sway {
+            from { transform: rotate(-2deg); }
+            to { transform: rotate(2deg); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            #demo-graph * { animation: none !important; }
+        }
+
+        /* 高风险区块：徽标 + 子问题状态 + 条件证据卡。
+           条件与数值始终同卡展示，不拆成两处，避免读者把某个数值
+           与不属于它的用法／限制程度配在一起。 */
+        .hr-block {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-left: 3px solid #b4552f;
+            border-radius: 8px;
+            background: rgba(180, 85, 47, 0.04);
+        }
+
+        .hr-head {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .hr-badge {
+            padding: 2px 9px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            color: #fff;
+            background: #b4552f;
+            border-radius: 999px;
+        }
+
+        .hr-badge.hr-ok { background: #3d6a4f; }
+        .hr-badge.hr-warn { background: #b4552f; }
+        .hr-badge.hr-bad { background: #8c2f22; }
+
+        .hr-substatus {
+            padding: 2px 8px;
+            font-size: 0.72rem;
+            color: var(--ink);
+            background: rgba(61, 106, 79, 0.1);
+            border-radius: 999px;
+        }
+
+        .hr-note {
+            margin: 4px 0 0;
+            font-size: 0.76rem;
+            line-height: 1.5;
+            color: #8c5a3a;
+        }
+
+        .hr-card {
+            margin-top: 8px;
+            padding: 9px 11px;
+            background: rgba(255, 254, 249, 0.92);
+            border: 1px solid var(--line);
+            border-radius: 7px;
+        }
+
+        .hr-card-head {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: baseline;
+            margin-bottom: 5px;
+        }
+
+        .hr-card-cat {
+            padding: 1px 7px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--ink);
+            background: rgba(61, 106, 79, 0.14);
+            border-radius: 4px;
+        }
+
+        .hr-card-subject {
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .hr-card-conditions {
+            margin: 0 0 5px;
+            font-size: 0.8rem;
+            line-height: 1.55;
+            color: var(--ink);
+        }
+
+        .hr-card-quote {
+            margin: 0;
+            font-size: 0.78rem;
+            line-height: 1.55;
+            color: #55504a;
+        }
+
+        .hr-card-meta {
+            margin-top: 5px;
+            font-size: 0.72rem;
+            color: #7d7770;
+        }
+
+        .hr-flag {
+            margin-top: 5px;
+            font-size: 0.74rem;
+            line-height: 1.5;
+            color: #8c2f22;
+        }
+
+        /* 答案分块：结论、原文依据、说明各有独立类，样式由类决定，
+           不再靠在前端查字符串临时加样式。 */
+        .answer-decision {
+            margin: 0 0 4px;
+            font-size: 0.92rem;
+            font-weight: 600;
+            line-height: 1.6;
+            color: var(--ink);
+        }
+
+        .answer-conclusion {
+            margin: 0 0 4px;
+            font-size: 0.86rem;
+            line-height: 1.6;
+            color: var(--ink);
+        }
+
+        /* 原文依据：与结论分开看。用现有 muted 色值，不退到读不清的浅灰。 */
+        .answer-evidence-quote {
+            margin: 0 0 3px;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            color: #55504a;
+        }
+
+        .answer-note {
+            margin: 0 0 4px;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            color: #8c5a3a;
+        }
+
+        /* 程序核验说明：灰色、字号略小、正常字重，位于全部结论与原文之后。 */
+        .answer-verification-note {
+            margin-top: 10px;
+            font-size: 0.78rem;
+            line-height: 1.55;
+            font-weight: 400;
+            color: var(--muted);
+        }
+
+        /* 证据卡里的「原文依据：」标签。 */
+        .hr-card-quote-label {
+            color: var(--muted);
+            font-weight: 400;
+        }
+
+        /* 与本题指定条件不同的证据：默认折叠，不进主回答。 */
+        .hr-other summary {
+            margin-top: 8px;
+            font-size: 0.76rem;
+            color: #7d7770;
+            cursor: pointer;
+        }
+
+        /* 结构化证据：默认折叠，需要核对条件与来源类型时再展开。 */
+        .hr-structured summary {
+            margin-top: 8px;
+            font-size: 0.76rem;
+            color: #7d7770;
+            cursor: pointer;
+        }
+
+        .hr-rejected summary {
+            font-size: 0.76rem;
+            color: #8c5a3a;
+            cursor: pointer;
+        }
+
+        .hr-rejected ul {
+            margin: 5px 0 0;
+            padding-left: 18px;
+            font-size: 0.74rem;
+            line-height: 1.55;
+            color: #7d7770;
         }
 
         #details-panel,
@@ -863,6 +1190,37 @@
                     <path d="M34 70 C58 78 72 96 78 126" fill="none" stroke="currentColor" stroke-width="0.9"/>
                 </svg>
             </div>
+            <svg id="demo-graph" viewBox="0 0 640 440" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                <g id="demo-ring">
+                    <circle class="demo-orbit" cx="320" cy="210" r="150" />
+                    <path class="demo-edge" d="M320,210 Q360,135 320,60" pathLength="100" />
+                    <path class="demo-edge" d="M320,210 Q344.7,128.7 426.1,103.9" pathLength="100" />
+                    <path class="demo-edge" d="M320,210 Q395,250 470,210" pathLength="100" />
+                    <path class="demo-edge" d="M320,210 Q401.3,234.7 426.1,316.1" pathLength="100" />
+                    <path class="demo-edge" d="M320,210 Q280,285 320,360" pathLength="100" />
+                    <path class="demo-edge" d="M320,210 Q295.3,291.3 213.9,316.1" pathLength="100" />
+                    <path class="demo-edge" d="M320,210 Q245,170 170,210" pathLength="100" />
+                    <path class="demo-edge" d="M320,210 Q238.7,185.3 213.9,103.9" pathLength="100" />
+                    <g class="herb-node"><circle cx="320" cy="60" r="9" /><text x="320" y="84" text-anchor="middle">人参</text></g>
+                    <g class="herb-node"><circle cx="426.1" cy="103.9" r="9" /><text x="426.1" y="127.9" text-anchor="middle">黄芪</text></g>
+                    <g class="herb-node"><circle cx="470" cy="210" r="9" /><text x="470" y="234" text-anchor="middle">当归</text></g>
+                    <g class="herb-node"><circle cx="426.1" cy="316.1" r="9" /><text x="426.1" y="340.1" text-anchor="middle">茯苓</text></g>
+                    <g class="herb-node"><circle cx="320" cy="360" r="9" /><text x="320" y="384" text-anchor="middle">白术</text></g>
+                    <g class="herb-node"><circle cx="213.9" cy="316.1" r="9" /><text x="213.9" y="340.1" text-anchor="middle">甘草</text></g>
+                    <g class="herb-node"><circle cx="170" cy="210" r="9" /><text x="170" y="234" text-anchor="middle">麻黄</text></g>
+                    <g class="herb-node"><circle cx="213.9" cy="103.9" r="9" /><text x="213.9" y="127.9" text-anchor="middle">柴胡</text></g>
+                </g>
+                <circle class="demo-particle" cx="150" cy="120" r="2.5" />
+                <circle class="demo-particle" cx="500" cy="80" r="2" />
+                <circle class="demo-particle" cx="530" cy="330" r="2.5" />
+                <circle class="demo-particle" cx="120" cy="330" r="2" />
+                <circle class="demo-particle" cx="320" cy="30" r="2" />
+                <circle class="demo-halo" cx="320" cy="210" r="58" />
+                <g class="demo-core">
+                    <circle cx="320" cy="210" r="46" />
+                    <text x="320" y="193" text-anchor="middle"><tspan x="320" dy="0">中</tspan><tspan x="320" dy="24">药</tspan><tspan x="320" dy="24">学</tspan></text>
+                </g>
+            </svg>
             <div id="loading">加载中...</div>
             <div id="empty-hint">暂不加载全图，避免卡顿<br>在左侧提问，让本草关系在此显形</div>
             <div id="details-panel"></div>
@@ -967,6 +1325,8 @@
         function setEmptyHintVisible(visible) {
             const hint = document.getElementById('empty-hint');
             if (hint) hint.style.display = visible ? 'block' : 'none';
+            const demo = document.getElementById('demo-graph');
+            if (demo) demo.style.display = visible ? 'block' : 'none';
         }
 
         function cloneGraphPayload(data) {
@@ -1016,6 +1376,56 @@
             return html.replace(/\n/g, '<br>');
         }
 
+        /* 行首 Markdown 标题标记与独占一行的分隔线只做**展示**清理：模型输出里的
+           「# 标题」「---」在页面上是纯噪声。两条规则都只吃行首 1～6 个 #（且 # 后
+           必须有空格）或整行只有分隔线的情况，行内与行尾的 # 一律保留
+           （「编号#123」「#1」不会被误删）。
+
+           前导空白用 [ \t] 而不用 \s：\s 会连行尾换行一起吃掉，把标题并到上一段
+           末尾（「…汇总\n\n# 人参」会变成「…汇总人参」），这是这类清理最常见的错。 */
+        const MARKDOWN_HEADING_RE = /^[ \t]{0,3}#{1,6}[ \t]+/gm;
+        const MARKDOWN_RULE_RE = /^[ \t]{0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$/gm;
+
+        function stripMarkdownLite(text) {
+            return String(text ?? '')
+                .replace(MARKDOWN_HEADING_RE, '')
+                .replace(MARKDOWN_RULE_RE, '')
+                // 只合并多余空行（3 行以上折成 1 个空行），段间分隔仍然保留，
+                // 不把正常段落压成一段。
+                .replace(/\n{3,}/g, '\n\n');
+        }
+
+        /* 成对的 Markdown 加粗标记只做**展示**处理：成对才去掉，落单的 ** 原样
+           保留——宁可多显示两个星号，也不能把内容吃掉。整个规范化都在
+           escapeHtml 之前完成（纯字符串处理，不产出 HTML），模型文本因此仍然
+           不会未经转义进入 innerHTML。 */
+        function normalizeAnswerText(text) {
+            return stripMarkdownLite(text).replace(/\*\*([^*\n]+)\*\*/g, '$1');
+        }
+
+        /* 高风险回答按后端给的分块渲染：样式由 kind 决定，不靠查字符串。
+           没有分块时（普通回答）走原来的整体渲染，行为不变。
+           程序核验说明单独成块，位于全部结论与原文之后。 */
+        function renderAnswerBody(data, nodes) {
+            const blocks = data.answer_blocks || [];
+            if (!blocks.length) {
+                return highlightEntities(normalizeAnswerText(data.answer || ''), nodes);
+            }
+            const body = blocks.map((block) => {
+                const text = highlightEntities(normalizeAnswerText(block.text || ''), nodes);
+                const kind = block.kind || 'text';
+                if (kind === 'decision') return `<p class="answer-decision">${text}</p>`;
+                if (kind === 'conclusion') return `<p class="answer-conclusion">${text}</p>`;
+                if (kind === 'quote') return `<p class="answer-evidence-quote">${text}</p>`;
+                if (kind === 'note') return `<p class="answer-note">${text}</p>`;
+                return `<p class="answer-text">${text}</p>`;
+            }).join('');
+            const note = data.verification_note
+                ? `<div class="answer-verification-note">${escapeHtml(normalizeAnswerText(data.verification_note))}</div>`
+                : '';
+            return body + note;
+        }
+
         function pageLabel(source) {
             if (source.page_start == null) return '页码未标注';
             return source.page_start === source.page_end
@@ -1057,6 +1467,152 @@
                         ${sourceCards}
                     </div>
                 </details>
+            `;
+        }
+
+        /* 高风险回答的状态文案。四档语义不同，展示上必须区分：
+           grounded 才代表用户问的高风险结论都给出了；
+           source_only / abstain 表示只有原文或什么都不能说，绝不是「安全」。 */
+        const HR_STATUS_LABEL = {
+            'grounded': '已核验',
+            'partial_grounded': '部分核验',
+            'source_only': '仅有原文，未形成结论',
+            'abstain': '证据不足，不予结论',
+            'verification_unavailable': '未通过核验（核验层不可用）'
+        };
+
+        const HR_STATUS_CLASS = {
+            'grounded': 'hr-ok',
+            'partial_grounded': 'hr-warn',
+            'source_only': 'hr-warn',
+            'abstain': 'hr-bad',
+            'verification_unavailable': 'hr-bad'
+        };
+
+        const HR_SUB_STATUS_LABEL = {
+            'grounded': '已核验',
+            'partial_grounded': '部分核验',
+            'source_only': '仅有原文',
+            'abstain': '无证据'
+        };
+
+        /* 结构化卡片放在哪里，按 answer_status 决定。**纯展示层策略**：
+           后端字段一个不动，`evidence_units` / `claims` / `sources` / `subgraph`
+           照常返回，溯源面板、接口契约、同源核验与评测都不受影响。
+
+           grounded 不再列卡：程序化回答块已经把同一批证据逐条写出（结论行 +
+           「原文依据：…（第 N 页）」+ 灰色核验说明），再列一次 evidence_units 就是
+           同一批证据的两套展示——实测附子用量页面「3～15g／原文依据／第 231 页」
+           各出现两次，读者要自己比对两边是否一致。
+
+           其余状态**不删卡片**，改为默认折叠：partial_grounded 的冲突要看卡片里的
+           条件与来源类型才能对照，source_only 的原文也仍然可查，只是不再与正文
+           重复展开。 */
+        const HR_CARDS_MODE = {
+            'grounded': 'none',
+            'partial_grounded': 'folded',
+            'source_only': 'folded',
+            'abstain': 'folded',
+            'verification_unavailable': 'folded'
+        };
+
+        function renderHighRiskBlock(data) {
+            const hr = data.high_risk;
+            if (!hr || !hr.is_high_risk) return '';
+
+            const status = data.answer_status || 'abstain';
+            const badge = `<span class="hr-badge ${HR_STATUS_CLASS[status] || 'hr-bad'}">
+                高风险 · ${escapeHtml(HR_STATUS_LABEL[status] || status)}
+            </span>`;
+
+            const subStatuses = (data.sub_questions || []).map(item => `
+                <span class="hr-substatus">
+                    ${escapeHtml(item.question)}：${escapeHtml(HR_SUB_STATUS_LABEL[item.status] || item.status)}
+                </span>
+            `).join('');
+
+            /* 未成立的部分要写出原因，而不是留给读者猜。 */
+            const reasons = (data.sub_questions || [])
+                .filter(item => item.status !== 'grounded')
+                .map(item => `<p class="hr-note">${escapeHtml(item.question)}：${escapeHtml(item.reason)}</p>`)
+                .join('');
+
+            /* 条件证据卡：条件、程度、来源类型与原文同卡。
+               数值绝不与它自己的用法／生制品／人群分开显示。
+               原文一律带「原文依据：」标签，与结论区分开。 */
+            const renderCard = (unit) => `
+                <article class="hr-card">
+                    <div class="hr-card-head">
+                        <span class="hr-card-cat">${escapeHtml(unit.category_label)}</span>
+                        <span class="hr-card-subject">${escapeHtml(unit.subject_name)}</span>
+                        ${unit.object_name ? `<span class="hr-card-meta">→ ${escapeHtml(unit.object_name)}</span>` : ''}
+                    </div>
+                    <p class="hr-card-conditions">
+                        ${escapeHtml(unit.conditions || '原文未给出附加条件')} · 程度：${escapeHtml(unit.severity_label)}
+                    </p>
+                    <p class="hr-card-quote"><span class="hr-card-quote-label">原文依据：</span>${escapeHtml(unit.evidence_quote || '（未取到原文）')}</p>
+                    <div class="hr-card-meta">
+                        ${escapeHtml(unit.page_label)} · 来源类型：${unit.source_kind === 'ASSERTION' ? '已校验断言' : '教材原文（未经断言校验）'}
+                        ${unit.is_citable ? '' : ' · 原文不可定位'}
+                    </div>
+                    <!-- 说明行由后端定稿（flags：原文说明／证据存在差异／当前证据不足以确定）。
+                         前端不再对 conflicts 各自套模板：套错会把解析层说明说成「证据存在差异」，
+                         与同一张卡的「已核验」徽标自相矛盾。 -->
+                    ${(unit.flags || []).map(flag => `<div class="hr-flag">${escapeHtml(flag)}</div>`).join('')}
+                </article>
+            `;
+            const units = data.evidence_units || [];
+            const cardsMode = HR_CARDS_MODE[status] || 'folded';
+            const renderedCards = units.map(renderCard).join('');
+            const cards = cardsMode === 'none'
+                ? ''
+                : (cardsMode === 'folded' && units.length
+                    ? `<details class="hr-structured">
+                           <summary>查看结构化证据 · ${units.length} 条（条件、程度与来源类型）</summary>
+                           ${renderedCards}
+                       </details>`
+                    : renderedCards);
+
+            /* 单元级风险说明（原文说明／证据存在差异／当前证据不足以确定）不跟着
+               卡片一起消失：grounded 不列卡时，这些说明必须仍然出现在页面上，
+               否则「证据存在差异」这类真正影响结论的信息会因为展示去重而丢掉。
+               卡片还在（折叠或展开）时说明留在卡内，不重复列出。 */
+            const unitFlags = cardsMode === 'none'
+                ? units
+                    .map(unit => unit.flags || [])
+                    .reduce((all, flags) => all.concat(flags), [])
+                    .filter((flag, index, all) => all.indexOf(flag) === index)
+                    .map(flag => `<div class="hr-flag">${escapeHtml(flag)}</div>`)
+                    .join('')
+                : '';
+
+            /* 与本题指定条件不同的证据：默认折叠，明确标注「与本题指定人群不同」。
+               它们不参与结论，也不在主要回答里出现。 */
+            const others = (data.other_conditions || []).length ? `
+                <details class="hr-other">
+                    <summary>其他使用注意（与本题指定人群不同）· ${(data.other_conditions || []).length} 条</summary>
+                    ${(data.other_conditions || []).map(renderCard).join('')}
+                </details>
+            ` : '';
+
+            /* 被驳回的候选结论与硬性失败原因同样展示，使「为什么没采用」可追溯，
+               也让模型自评无法在界面上悄悄翻案。 */
+            const rejections = (data.rejections || []).length ? `
+                <details class="hr-rejected">
+                    <summary>本回答中 ${(data.rejections || []).length} 条候选结论未通过程序核验</summary>
+                    <ul>
+                        ${(data.rejections || []).map(item => `
+                            <li>${escapeHtml(item.claim_id)}：${escapeHtml([].concat(item.notes || [], item.hard_failures || []).join('；'))}</li>
+                        `).join('')}
+                    </ul>
+                </details>
+            ` : '';
+
+            return `
+                <div class="hr-block">
+                    <div class="hr-head">${badge}${subStatuses}</div>
+                    ${reasons}${unitFlags}${cards}${others}${rejections}
+                </div>
             `;
         }
 
@@ -1395,7 +1951,8 @@
 
                     aiMsg.innerHTML = `
                         <div class="msg-label">回答 · ${escapeHtml(methodLabel)}</div>
-                        <div class="bubble">${highlightEntities(data.answer || '', subgraph.nodes || [])}</div>
+                        <div class="bubble">${renderAnswerBody(data, subgraph.nodes || [])}</div>
+                        ${renderHighRiskBlock(data)}
                         ${renderProvenance(data, subgraph)}
                         <div class="source-meta" style="margin-top:8px;">画布展示相关子图：${nodeCount} 个节点，${edgeCount} 条关系</div>
                     `;

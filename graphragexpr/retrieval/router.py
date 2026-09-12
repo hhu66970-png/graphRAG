@@ -46,6 +46,11 @@ _HIGH_RISK_TERMS = (
     "相恶",
 )
 
+#: 公开别名：高风险服务层需要在没有 RetrievalPlan 的检索模式（如纯关键词图模式）
+#: 下判断同一个问题是否属于高风险。共用同一份词表，避免两处判定标准漂移；
+#: 这只是**策略开关**，六意图枚举不变（任务书 §1）。
+HIGH_RISK_TERMS: tuple[str, ...] = _HIGH_RISK_TERMS
+
 _PREDICATE_TERMS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("性味", "寒热", "温凉"), ("HAS_NATURE_FLAVOR",)),
     (("归经", "经脉"), ("ENTERS_MERIDIAN",)),
