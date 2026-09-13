@@ -38,6 +38,7 @@ RETRIEVAL_TOP_K = 2
 MAX_SUBGRAPH_NODES = 40
 MAX_SUBGRAPH_EDGES = 60
 MAX_GRAPH_TRIPLES = 40
+MAX_CONTEXT_CHUNKS = 8
 _LUCENE_SPECIAL = re.compile(r'([+\-&|!(){}\[\]^"~*?:\\/])')
 
 
@@ -102,28 +103,28 @@ def _keyword_graph_search(
     database = os.getenv("NEO4J_DB") or None
     candidate_count = RETRIEVAL_CANDIDATE_K
 
+    exact_terms = []
+    lexical_candidates = []
     with driver.session(database=database) as session:
-        exact_terms = [
-            record["name"]
-            for record in session.run(
-                """
-                MATCH (entity)
-                WHERE (entity:中药 OR entity:方剂 OR entity:功效 OR entity:主治
-                       OR entity:概念 OR entity:典籍 OR entity:性味 OR entity:归经)
-                  AND entity.name IS NOT NULL
-                  AND size(entity.name) >= 2
-                  AND size(entity.name) <= 20
-                  AND $question CONTAINS entity.name
-                RETURN DISTINCT entity.name AS name
-                ORDER BY size(entity.name) DESC
-                LIMIT 20
-                """,
-                question=question,
-            )
-        ]
-
-        lexical_candidates = []
         if use_fulltext:
+            exact_terms = [
+                record["name"]
+                for record in session.run(
+                    """
+                    MATCH (entity)
+                    WHERE (entity:中药 OR entity:方剂 OR entity:功效 OR entity:主治
+                           OR entity:概念 OR entity:典籍 OR entity:性味 OR entity:归经)
+                      AND entity.name IS NOT NULL
+                      AND size(entity.name) >= 2
+                      AND size(entity.name) <= 20
+                      AND $question CONTAINS entity.name
+                    RETURN DISTINCT entity.name AS name
+                    ORDER BY size(entity.name) DESC
+                    LIMIT 20
+                    """,
+                    question=question,
+                )
+            ]
             fulltext_query = _build_fulltext_query(question, exact_terms)
             try:
                 lexical_candidates = [
@@ -190,7 +191,7 @@ def _keyword_graph_search(
             if use_vector is None
             else use_vector
         )
-        if vector_enabled:
+        if vector_enabled and not use_fulltext:
             query_embedding = _configured_embedder().embed_query(question)
             vector_candidates = [
                 {
@@ -256,7 +257,7 @@ def _keyword_graph_search(
         chunk["matched_terms"] = lexical.get("matched_terms", [])
         ranked_chunks.append(chunk)
 
-    if ranked_chunks and ranked_chunks[0].get("index") is not None:
+    if expand_graph and ranked_chunks and ranked_chunks[0].get("index") is not None:
         lead_index = ranked_chunks[0]["index"]
         with driver.session(database=database) as session:
             companion_record = session.run(
@@ -285,69 +286,26 @@ def _keyword_graph_search(
     edges = []
     triples = []
     if chunk_ids and expand_graph:
+        from graphragexpr.retrieval.cross_chunk_graph import (
+            expand_cross_chunk_neighborhood,
+            merge_extra_chunks,
+            read_active_run_id,
+        )
+
         with driver.session(database=database) as session:
-            records = session.run(
-                """
-                UNWIND $chunk_ids AS chunk_id
-                MATCH (chunk:Chunk) WHERE elementId(chunk) = chunk_id
-                MATCH (entity)-[:FROM_CHUNK]->(chunk)
-                WHERE NOT entity:Chunk AND NOT entity:Document
-                OPTIONAL MATCH (entity)-[relationship]-(neighbor)
-                WHERE NOT neighbor:Chunk AND NOT neighbor:Document
-                  AND (neighbor)-[:FROM_CHUNK]->(chunk)
-                RETURN DISTINCT
-                       elementId(entity) AS source_id,
-                       labels(entity)[0] AS source_label,
-                       coalesce(entity.preferred_name, entity.name) AS source_name,
-                       elementId(neighbor) AS target_id,
-                       labels(neighbor)[0] AS target_label,
-                       coalesce(neighbor.preferred_name, neighbor.name) AS target_name,
-                       type(relationship) AS relationship_type
-                LIMIT $record_limit
-                """,
-                chunk_ids=chunk_ids,
-                record_limit=MAX_SUBGRAPH_EDGES * 2,
+            node_list, edges, triples, extra_chunks = expand_cross_chunk_neighborhood(
+                session,
+                chunk_ids,
+                run_id=read_active_run_id(session),
+                node_limit=MAX_SUBGRAPH_NODES,
+                edge_limit=MAX_SUBGRAPH_EDGES,
+                triple_limit=MAX_GRAPH_TRIPLES,
+                extra_chunk_limit=MAX_CONTEXT_CHUNKS,
             )
-            for record in records:
-                if len(nodes) >= MAX_SUBGRAPH_NODES and len(edges) >= MAX_SUBGRAPH_EDGES:
-                    break
-
-                source_id = record["source_id"]
-                if source_id not in nodes:
-                    if len(nodes) >= MAX_SUBGRAPH_NODES:
-                        continue
-                    nodes[source_id] = {
-                        "id": source_id,
-                        "label": record["source_name"],
-                        "type": record["source_label"],
-                    }
-
-                target_id = record["target_id"]
-                relationship_type = record["relationship_type"]
-                if target_id:
-                    if target_id not in nodes:
-                        if len(nodes) >= MAX_SUBGRAPH_NODES:
-                            continue
-                        nodes[target_id] = {
-                            "id": target_id,
-                            "label": record["target_name"],
-                            "type": record["target_label"],
-                        }
-                    if relationship_type and len(edges) < MAX_SUBGRAPH_EDGES:
-                        edge = {
-                            "source": source_id,
-                            "target": target_id,
-                            "type": relationship_type,
-                        }
-                        if edge not in edges:
-                            edges.append(edge)
-                        triple = (
-                            record["source_name"],
-                            relationship_type,
-                            record["target_name"],
-                        )
-                        if triple not in triples and len(triples) < MAX_GRAPH_TRIPLES:
-                            triples.append(triple)
+        nodes = {node["id"]: node for node in node_list}
+        ranked_chunks = merge_extra_chunks(
+            ranked_chunks, extra_chunks, limit=MAX_CONTEXT_CHUNKS
+        )
 
     return ranked_chunks, {"nodes": list(nodes.values()), "edges": edges}, triples
 
@@ -382,7 +340,7 @@ def _evidence_only_answer(packet):
 
 
 def _retrieve_auto(question):
-    """auto / kg_v2 的**检索部分**：链接、路由、检索，不生成自然语言。
+    """auto 的**检索部分**：链接、路由、检索，不生成自然语言。
 
     拆出来的原因是高风险问题只允许执行检索部分：先跑一遍自由文本生成再
     丢掉，既浪费一次模型调用，也让高风险答案无谓地依赖普通 LLM 是否可用。
@@ -458,14 +416,25 @@ def _generate_auto(question, packet, subgraph, sources):
         )
 
     retrieval_trace = json.dumps(packet.trace, ensure_ascii=False, indent=2)
+    warning_block = ""
+    if packet.warnings:
+        warning_block = (
+            "# 检索警告（必须写入回答，不得忽略）\n"
+            + "\n".join(packet.warnings)
+            + "\n\n"
+        )
 
     prompt = f"""请严格依据下面的《中药学》结构化检索证据回答问题。
 不得使用证据外知识；关键结论必须引用对应 PDF 页码。
+同一主体的属性可能来自不同页，请综合全部证据作答，不要只根据第一条。
 部分匹配不得表述为全部满足。
+问「均不能 / 都不能搭配」时，必须同时交代各药各自的禁忌，以及是否存在共同对象；
+没有共同对象时要明确写出，不得把单味药的禁忌说成两药共有。
+COMBINED_WITH（适宜配伍）不能当作配伍禁忌。
 涉及剂量、毒性、禁忌、孕妇或儿童时，只能逐字依据证据，
 并提醒以教材原文和专业人员意见为准。
 
-# 检索意图
+{warning_block}# 检索意图
 {packet.intent}
 
 # 问题
@@ -519,7 +488,7 @@ def _retrieve_keyword_graph(
     return chunks, subgraph, triples, sources
 
 
-def _generate_keyword_graph(question, chunks, triples):
+def _generate_keyword_graph(question, chunks, triples, *, use_graph=True):
     """原生检索的**生成部分**。非高风险问题才会走到这里。"""
     if not chunks:
         raise RuntimeError("数据库中没有可检索的教材文本块")
@@ -533,14 +502,14 @@ def _generate_keyword_graph(question, chunks, triples):
             f"[教材片段 {position}｜PDF 第 {page_label} 页]\n{chunk['text']}"
         )
 
-    graph_context = "\n".join(
-        f"- {source} --[{relationship}]--> {target}"
-        for source, relationship, target in triples[:MAX_GRAPH_TRIPLES]
-    ) or "- 未抽取到与命中文本块直接相关的三元组"
-
-    prompt = f"""请严格依据下面的《中药学》教材片段回答问题。
-优先使用教材原文中的定义和分类，不要因为知识图谱三元组不完整而忽略教材正文。
-回答应直接、分点清楚，并在关键结论后标注对应的 PDF 页码。
+    if use_graph:
+        graph_context = "\n".join(
+            f"- {source} --[{relationship}]--> {target}"
+            for source, relationship, target in triples[:MAX_GRAPH_TRIPLES]
+        ) or "- 未抽取到与命中文本块直接相关的三元组"
+        prompt = f"""请严格依据下面的《中药学》教材片段与知识图谱关系回答问题。
+图谱关系可能来自其他页的文本块，请把多块证据拼成完整答案，不要只根据第一段作答。
+优先使用教材原文中的定义和分类；关键结论后标注对应的 PDF 页码。
 如果问题涉及剂量、毒性或临床建议，提醒用户以教材原文和专业人员意见为准。
 
 # 问题
@@ -551,6 +520,18 @@ def _generate_keyword_graph(question, chunks, triples):
 
 # 命中文本块内部的知识图谱关系（仅作补充）
 {graph_context}
+"""
+    else:
+        prompt = f"""请严格依据下面的《中药学》向量检索片段回答问题。
+只能使用下列原文，不得调用或补充知识图谱关系，也不得引入未出现在片段中的配伍、禁忌或跨页事实。
+关键结论后标注对应的 PDF 页码。
+如果问题涉及剂量、毒性或临床建议，提醒用户以教材原文和专业人员意见为准。
+
+# 问题
+{question}
+
+# 向量检索命中的教材原文
+{chr(10).join(textbook_context)}
 """
 
     client = OpenAI(
@@ -854,7 +835,7 @@ _VERIFICATION_UNAVAILABLE = "verification_unavailable"
 #:
 #: 所选 method 在高风险链路上的作用只有**前置定位**：
 #:   - 决定执行哪条检索、带什么参数（`retrieval.params` 如实记录）；
-#:   - `auto` / `kg_v2` 由检索层的路由给出 `linked_entities`，其余五种由接口层
+#:   - `auto` 由检索层的路由给出 `linked_entities`，图检索 / 向量检索由接口层
 #:     用既有链接器在 ACTIVE 批次里解析——两者都只决定「核验层读哪些主语」；
 #:   - 检索命中的原文只在**核验不可用时**被照录展示（逐条 `verified: false`），
 #:     不是结论的证据。
@@ -864,16 +845,12 @@ _EVIDENCE_METHOD = "high_risk_assertion"
 
 #: auto 家族：走 `retrieve()` 管线（含意图路由，其 `route.is_high_risk` 与词表
 #: 判定相互印证）。
-_AUTO_METHODS = frozenset({"auto", "kg_v2"})
+_AUTO_METHODS = frozenset({"auto"})
 
-#: 原生家族：参数与既有路由里的取值**逐项一致**，提到模块级只是为了让高风险
-#: 分支也能按用户所选 method 执行它自己的检索部分，而不是一律改走 auto。
+#: 对外只保留两种原生检索：图检索跨实体补其他页，向量检索只走向量通道。
 _NATIVE_METHODS = {
-    "keyword_graph": {"use_fulltext": True, "use_vector": None, "expand_graph": True},
+    "keyword_graph": {"use_fulltext": True, "use_vector": False, "expand_graph": True},
     "vector": {"use_fulltext": False, "use_vector": True, "expand_graph": False},
-    "vector_cypher": {"use_fulltext": False, "use_vector": True, "expand_graph": True},
-    "hybrid": {"use_fulltext": True, "use_vector": True, "expand_graph": False},
-    "hybrid_cypher": {"use_fulltext": True, "use_vector": True, "expand_graph": True},
 }
 
 _ALL_METHODS = _AUTO_METHODS | frozenset(_NATIVE_METHODS)
@@ -972,7 +949,7 @@ def _link_question_entities(question):
 def _high_risk_retrieval(question, method, *, auto_result=None):
     """只执行用户所选 method 的**检索部分**，不生成任何自由文本。
 
-    `auto` / `kg_v2` 走 `retrieve()`（路由、链接、检索都在里面）；其余五种走
+    `auto` 走 `retrieve()`（路由、链接、检索都在里面）；图检索 / 向量检索走
     原生检索，参数就是用户所选 method 的参数。检索结果随后进入统一的证据组织
     与核验：`linked_entities` 决定核验层读哪些主语/宾语，`raw_text` 只在核验层
     不可用时用于**原文展示**（明确标注未经核验）。
@@ -1389,7 +1366,13 @@ def graphrag_query():
         chunks, subgraph, triples, sources = _retrieve_keyword_graph(
             question, **params
         )
-        answer = _generate_keyword_graph(question, chunks, triples)
+        use_graph = bool(params.get("expand_graph"))
+        if not use_graph:
+            subgraph = {"nodes": [], "edges": []}
+            triples = []
+        answer = _generate_keyword_graph(
+            question, chunks, triples, use_graph=use_graph
+        )
         return jsonify({
             "answer": answer,
             "method": method,
@@ -1404,10 +1387,24 @@ def graphrag_query():
         return jsonify({"error": str(e)}), 500
 
 
+def _warmup_embedder():
+    """Load the local embedding model in the background so vector modes are not cold."""
+    provider = (os.getenv("EMBED_PROVIDER") or "hash").strip().lower()
+    if provider == "hash":
+        return
+    try:
+        _configured_embedder()
+        print("✓ 向量模型已预热，向量/混合检索可直接使用")
+    except Exception as exc:
+        print(f"向量模型预热失败（不影响自动路由）：{exc}")
+
+
 if __name__ == '__main__':
     print("Starting GraphRAG Backend API...")
     print(f"Neo4j URI: {os.getenv('NEO4J_URL')}")
     print("API will be available at http://localhost:5000")
+    import threading
+    threading.Thread(target=_warmup_embedder, daemon=True).start()
     print("\nAvailable endpoints:")
     print("  GET  /api/health          - Health check")
     print("  GET  /api/graph           - Get complete knowledge graph")

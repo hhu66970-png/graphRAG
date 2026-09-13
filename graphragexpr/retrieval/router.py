@@ -29,6 +29,24 @@ _REVERSE_TERMS = (
     "有何药",
     "用什么药",
 )
+_INCOMPAT_HINTS = (
+    "配伍禁忌",
+    "十八反",
+    "十九畏",
+    "相反",
+    "相畏",
+    "相恶",
+    "不能同用",
+    "不宜同用",
+    "不可同用",
+    "不能同时",
+    "不能搭配",
+    "不宜与",
+    "不可与",
+)
+_NEGATIVE_COMBO_TERMS = ("不能", "不宜", "不可", "禁止", "忌")
+_COMBO_OBJECT_TERMS = ("同用", "合用", "配伍", "搭配", "同时")
+_GENERIC_HERBS = frozenset({"中药", "中药材", "药材", "药"})
 _HIGH_RISK_TERMS = (
     "剂量",
     "用量",
@@ -44,6 +62,11 @@ _HIGH_RISK_TERMS = (
     "相反",
     "相畏",
     "相恶",
+    "不能同时",
+    "不能搭配",
+    "不能同用",
+    "不宜同用",
+    "不可同用",
 )
 
 #: 公开别名：高风险服务层需要在没有 RetrievalPlan 的检索模式（如纯关键词图模式）
@@ -56,9 +79,22 @@ _PREDICATE_TERMS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("归经", "经脉"), ("ENTERS_MERIDIAN",)),
     (("功效", "作用"), ("HAS_EFFICACY",)),
     (("主治", "治疗", "病证", "症状"), ("TREATS",)),
-    (("剂量", "用量", "用法", "服用"), ("HAS_DOSAGE",)),
+    (("剂量", "用量", "用法", "服用", "中毒", "使用多少", "用多少"), ("HAS_DOSAGE",)),
     (("禁忌", "慎用", "忌用", "孕妇", "儿童", "不良反应"), ("CONTRAINDICATED_IN",)),
-    (("配伍禁忌", "相反", "相畏", "相恶"), ("INCOMPATIBLE_WITH",)),
+    (
+        (
+            "配伍禁忌",
+            "相反",
+            "相畏",
+            "相恶",
+            "不能同用",
+            "不宜同用",
+            "不可同用",
+            "不能同时",
+            "不能搭配",
+        ),
+        ("INCOMPATIBLE_WITH",),
+    ),
     (("配伍", "同用"), ("COMBINED_WITH",)),
     (("来源", "基原"), ("DERIVED_FROM",)),
     (("炮制",), ("PROCESSED_AS",)),
@@ -66,6 +102,15 @@ _PREDICATE_TERMS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("典籍", "记载"), ("RECORDED_IN",)),
     (("类别", "分类", "属于"), ("BELONGS_TO_CATEGORY",)),
 )
+
+
+def _is_incompatibility_question(question: str) -> bool:
+    """问的是「不宜/不能同用」，不是「可以配伍」。"""
+    if any(term in question for term in _INCOMPAT_HINTS):
+        return True
+    return any(term in question for term in _NEGATIVE_COMBO_TERMS) and any(
+        term in question for term in _COMBO_OBJECT_TERMS
+    )
 
 
 def _mentioned_predicates(question: str, ontology: Ontology) -> tuple[str, ...]:
@@ -105,7 +150,11 @@ def route_query(
         if entity.get("canonical_id")
     )
     herbs = [
-        entity for entity in linked_entities if entity.get("entity_type") == "HERB"
+        entity
+        for entity in linked_entities
+        if entity.get("entity_type") == "HERB"
+        and (entity.get("name") or entity.get("preferred_name") or "")
+        not in _GENERIC_HERBS
     ]
     constraints = [
         entity
@@ -114,6 +163,21 @@ def route_query(
     ]
     is_high_risk = any(term in normalized for term in _HIGH_RISK_TERMS)
     require_provenance = is_high_risk or bool(linked_entities)
+
+    if _is_incompatibility_question(normalized) and herbs:
+        herb_ids = tuple(str(item["canonical_id"]) for item in herbs[:4])
+        multi = len(herb_ids) >= 2
+        return RetrievalPlan(
+            "compare" if multi else "attr",
+            herb_ids,
+            ("INCOMPATIBLE_WITH",),
+            1,
+            True,
+            "summary" if multi else "card",
+            "matched incompatibility wording for one or more herbs",
+            0.96,
+            True,
+        )
 
     if any(term in normalized for term in _COMPARE_TERMS):
         return RetrievalPlan(
@@ -128,7 +192,10 @@ def route_query(
             is_high_risk,
         )
 
-    if len(constraints) >= 2 and any(term in normalized for term in _INTERSECT_TERMS):
+    has_reverse_word = any(term in normalized for term in _REVERSE_TERMS)
+    if len(constraints) >= 2 and (
+        any(term in normalized for term in _INTERSECT_TERMS) or has_reverse_word
+    ):
         return RetrievalPlan(
             "intersect",
             tuple(str(item["canonical_id"]) for item in constraints),
@@ -155,7 +222,6 @@ def route_query(
             is_high_risk,
         )
 
-    has_reverse_word = any(term in normalized for term in _REVERSE_TERMS)
     if constraints and (has_reverse_word or (not herbs and len(constraints) == 1)):
         return RetrievalPlan(
             "reverse",
@@ -166,6 +232,20 @@ def route_query(
             "table",
             "matched reverse wording or linked a constraint without a herb",
             0.92,
+            is_high_risk,
+        )
+
+    if len(herbs) >= 2:
+        herb_ids = tuple(str(item["canonical_id"]) for item in herbs[:4])
+        return RetrievalPlan(
+            "compare",
+            herb_ids,
+            mentioned or all_predicates,
+            1,
+            require_provenance,
+            "summary",
+            "linked multiple herbs; retrieve each instead of the first only",
+            0.91,
             is_high_risk,
         )
 

@@ -41,6 +41,15 @@ def test_negated_co_use_action_keeps_the_incompatibility():
     assert "不宜与" in interpretation.matched_cues
 
 
+def test_eighteen_antagonism_formula_keeps_the_incompatibility():
+    """「人参反藜芦」是十八反的肯定句式，配伍禁忌关系成立。"""
+    interpretation = interpret("INCOMPATIBLE_WITH", "POSITIVE", "人参反藜芦。", "藜芦")
+
+    assert interpretation.verdict is PolarityVerdict.RELATION_HOLDS
+    assert interpretation.ambiguous is False
+    assert "反藜芦" in interpretation.matched_cues
+
+
 def test_restricted_use_keeps_the_contraindication():
     """「孕妇慎用」没有「同用」句式，但程度词限定的正是「使用」，禁忌成立。"""
     interpretation = interpret("CONTRAINDICATED_IN", "NEGATIVE", "孕妇慎用。", "孕妇")

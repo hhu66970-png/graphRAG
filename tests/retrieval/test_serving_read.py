@@ -72,6 +72,66 @@ def test_intersection_groups_exact_and_partial_matches():
     assert store.calls[0][1]["constraint_count"] == 2
 
 
+def test_intersection_uses_compound_efficacy_names_when_ids_miss():
+    class SwitchingStore:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def run(self, query, **params):
+            self.calls.append(params)
+            if params.get("names"):
+                return [
+                    {
+                        "herb": "黄芪",
+                        "herb_id": "HERB:huangqi",
+                        "matches": [
+                            {
+                                "target_id": "EFFICACY:buqilishui",
+                                "target_name": "补气利水",
+                                "target_type": "EFFICACY",
+                                "predicate": "HAS_EFFICACY",
+                            }
+                        ],
+                        "matched_ids": ["EFFICACY:buqilishui"],
+                        "matched_names": ["补气利水"],
+                        "evidence_ids": ["a1"],
+                        "pages": [289],
+                        "best_score": 0.9,
+                    }
+                ]
+            return [
+                {
+                    "herb": "黄芪",
+                    "herb_id": "HERB:huangqi",
+                    "matches": [
+                        {
+                            "target_id": "EFFICACY:buqi",
+                            "target_name": "补气",
+                            "target_type": "EFFICACY",
+                            "predicate": "HAS_EFFICACY",
+                        }
+                    ],
+                    "matched_ids": ["EFFICACY:buqi"],
+                    "matched_names": ["补气"],
+                    "evidence_ids": ["a0"],
+                    "pages": [289],
+                    "best_score": 0.8,
+                }
+            ]
+
+    store = SwitchingStore()
+    rows = serving_read.find_herbs_by_constraints(
+        store,
+        ["EFFICACY:buqi", "EFFICACY:lishui"],
+        run_id="run-1",
+        constraint_names=["补气", "利水"],
+    )
+
+    assert rows[0]["exact_match"] is True
+    assert set(rows[0]["matched_ids"]) == {"EFFICACY:buqi", "EFFICACY:lishui"}
+    assert store.calls[1]["names"] == ["补气", "利水"]
+
+
 def test_path_query_caps_hops_and_requires_serving_provenance():
     store = FakeStore([])
 

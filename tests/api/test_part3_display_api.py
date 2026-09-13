@@ -798,11 +798,11 @@ def test_risk_sections_survive_alongside_the_hidden_cards(frontend_rendered):
 
 
 def test_provenance_entry_still_renders_without_the_cards(frontend_rendered):
-    """⑤ grounded 不列卡之后，「Graph 检索溯源」入口照旧可用。"""
+    """⑤ grounded 不列卡之后，检索溯源入口照旧可用。"""
     html = frontend_rendered["provenance_html"]
 
     assert '<details class="trace-block">' in html
-    assert "Graph 检索溯源" in html
+    assert "检索溯源" in html
     assert "第 231 页" in html
     assert "附子煎服，3～15g。" in html
 

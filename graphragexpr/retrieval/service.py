@@ -8,7 +8,12 @@ from collections.abc import Callable
 from ..config.settings import DEFAULT_RETRIEVAL_SETTINGS, RetrievalSettings
 from ..domain.models import EvidenceItem, EvidencePacket
 from ..domain.ontology import Ontology
+from ..domain.high_risk import TASK_HIGH_RISK_PREDICATES
 from ..storage import serving_read
+from ..storage.high_risk_read import (
+    load_assertion_edges_between,
+    load_high_risk_assertions,
+)
 from ..storage.neo4j_store import Neo4jStore
 from .comparison import reduce_section_summaries
 from .models import RetrievalPlan, RetrievalResult
@@ -45,6 +50,8 @@ def _evidence_items(
             qualifiers.setdefault("subject_name", row["subject_name"])
         if row.get("object_name"):
             qualifiers.setdefault("object_name", row["object_name"])
+        if chunk_ids:
+            qualifiers.setdefault("chunk_ids", list(chunk_ids))
         items.append(
             EvidenceItem(
                 evidence_id=evidence_id,
@@ -74,15 +81,36 @@ def _load_evidence_for_ids(store: Neo4jStore, evidence_ids: list[str]) -> list[d
 def _apply_token_budget(
     items: list[EvidenceItem], token_budget: int
 ) -> tuple[list[EvidenceItem], int]:
-    """Keep whole evidence quotes within a conservative one-character/token budget."""
+    """Keep whole evidence quotes within a conservative one-character/token budget.
+
+    Round-robin by subject so one herb's pages cannot crowd out the others.
+    """
+    buckets: dict[str, list[EvidenceItem]] = {}
+    order: list[str] = []
+    for item in items:
+        key = str(item.subject_id or item.chunk_id or item.evidence_id)
+        if key not in buckets:
+            order.append(key)
+            buckets[key] = []
+        buckets[key].append(item)
     selected: list[EvidenceItem] = []
     used = 0
-    for item in items:
-        estimated = len(item.evidence_quote) + 32
-        if selected and used + estimated > token_budget:
-            continue
-        selected.append(item)
-        used += estimated
+    pending = True
+    while pending:
+        pending = False
+        for key in order:
+            if not buckets[key]:
+                continue
+            item = buckets[key][0]
+            estimated = len(item.evidence_quote) + 32
+            if selected and used + estimated > token_budget:
+                buckets[key].pop(0)
+                pending = True
+                continue
+            buckets[key].pop(0)
+            selected.append(item)
+            used += estimated
+            pending = True
     return selected, used
 
 
@@ -105,6 +133,141 @@ def _path_score(path: dict) -> float:
     )
 
 
+def _is_incompat_plan(plan: RetrievalPlan) -> bool:
+    return plan.allowed_predicates == ("INCOMPATIBLE_WITH",)
+
+
+def _high_risk_predicates(plan: RetrievalPlan) -> tuple[str, ...]:
+    return tuple(
+        predicate
+        for predicate in plan.allowed_predicates
+        if predicate in TASK_HIGH_RISK_PREDICATES
+    )
+
+
+def _map_assertion_rows(rows: list[dict]) -> list[dict]:
+    mapped: list[dict] = []
+    for row in rows:
+        mapped.append(
+            {
+                **row,
+                "quote": row.get("quote") or row.get("evidence_quote") or "",
+                "support_score": float(
+                    row.get("support_score") or row.get("final_score") or 0.0
+                ),
+                "object_type": row.get("object_type") or "ENTITY",
+            }
+        )
+    return mapped
+
+
+def _load_assertion_facts(
+    store: Neo4jStore,
+    *,
+    run_id: str,
+    subject_ids: list[str],
+    predicates: tuple[str, ...],
+) -> list[dict]:
+    if not subject_ids or not predicates:
+        return []
+    return _map_assertion_rows(
+        load_high_risk_assertions(
+            store,
+            run_id=run_id,
+            subject_ids=subject_ids,
+            predicates=predicates,
+        )
+    )
+
+
+def _retrieve_incompatibilities(
+    store: Neo4jStore,
+    linked: list[dict],
+    plan: RetrievalPlan,
+    run_id: str,
+) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    """Read INCOMPATIBLE_WITH from the assertion layer, not the serving graph.
+
+    Serving projection drops NEGATIVE polarity, so「不宜同用」never appears as
+    a COMBINED_WITH neighbour. Multi-herb questions must list every subject and
+    say explicitly when there is no shared incompatible partner.
+    """
+    herb_ids = list(plan.linked_entity_ids)
+    if not herb_ids:
+        return [], {"nodes": [], "edges": []}, {}, ["未链接到中药实体"]
+    herb_by_id = {}
+    for item in linked:
+        canonical_id = item.get("canonical_id")
+        if canonical_id in herb_ids:
+            herb_by_id[canonical_id] = (
+                item.get("name") or item.get("preferred_name") or canonical_id
+            )
+    rows = load_high_risk_assertions(
+        store,
+        run_id=run_id,
+        subject_ids=herb_ids,
+        predicates=("INCOMPATIBLE_WITH",),
+    )
+    evidence_rows = []
+    objects_by_subject: dict[str, set[str]] = {herb_id: set() for herb_id in herb_ids}
+    for row in rows:
+        evidence_rows.append(
+            {
+                **row,
+                "quote": row.get("evidence_quote") or "",
+                "support_score": float(row.get("final_score") or 0.0),
+                "object_type": row.get("object_type") or "HERB",
+            }
+        )
+        subject_id = row.get("subject_id")
+        object_name = row.get("object_name")
+        if subject_id in objects_by_subject and object_name:
+            objects_by_subject[subject_id].add(object_name)
+    items = _evidence_items(evidence_rows)
+    warnings: list[str] = []
+    missing = [
+        herb_by_id.get(herb_id, herb_id)
+        for herb_id in herb_ids
+        if not objects_by_subject.get(herb_id)
+    ]
+    if missing:
+        warnings.append(
+            "以下中药未检索到配伍禁忌（INCOMPATIBLE_WITH）断言："
+            + "、".join(missing)
+        )
+    shared: list[str] = []
+    if len(herb_ids) >= 2:
+        present = [herb_id for herb_id in herb_ids if objects_by_subject.get(herb_id)]
+        if len(present) == len(herb_ids):
+            shared = sorted(
+                set.intersection(*(objects_by_subject[herb_id] for herb_id in herb_ids))
+            )
+        if shared:
+            warnings.append("共同不宜同用对象：" + "、".join(shared))
+        else:
+            warnings.append(
+                "现有证据中没有两药共同的不宜同用对象；"
+                "不得把单味药的禁忌推广为两药共有"
+            )
+    subgraph_rows = [row for row in evidence_rows if row.get("object_id")]
+    linked_subjects = [
+        item for item in linked if item.get("canonical_id") in set(herb_ids)
+    ]
+    return (
+        items,
+        _fact_rows_to_subgraph(subgraph_rows, linked_subjects),
+        {
+            "incompatibility_by_herb": {
+                herb_by_id.get(herb_id, herb_id): sorted(objects_by_subject[herb_id])
+                for herb_id in herb_ids
+            },
+            "shared_incompatible_objects": shared,
+            "herbs_without_incompatibility": missing,
+        },
+        warnings,
+    )
+
+
 def _retrieve_attr(
     store: Neo4jStore,
     ontology: Ontology,
@@ -112,30 +275,59 @@ def _retrieve_attr(
     plan: RetrievalPlan,
     run_id: str,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
-    herb = next((item for item in linked if item.get("entity_type") == "HERB"), None)
+    planned_id = plan.linked_entity_ids[0] if plan.linked_entity_ids else None
+    herb = next(
+        (
+            item
+            for item in linked
+            if planned_id and item.get("canonical_id") == planned_id
+        ),
+        None,
+    ) or next((item for item in linked if item.get("entity_type") == "HERB"), None)
     if not herb:
         return [], {"nodes": [], "edges": []}, {}, ["未链接到中药实体"]
     card = serving_read.get_herb_card(store, ontology, herb["name"], run_id=run_id)
-    if card is None or card.is_empty():
+    items: list[EvidenceItem] = []
+    subgraph = {"nodes": [], "edges": []}
+    selected_slots: list[str] = []
+    if card is not None and not card.is_empty():
+        slots = [
+            slot for slot in card.slots if slot.predicate in plan.allowed_predicates
+        ]
+        selected_slots = [slot.predicate for slot in slots]
+        evidence_ids = [
+            evidence_id for slot in slots for evidence_id in slot.evidence_ids
+        ]
+        items = _evidence_items(_load_evidence_for_ids(store, evidence_ids))
+        subgraph = card.subgraph
+    risk_predicates = _high_risk_predicates(plan)
+    extra_rows = _load_assertion_facts(
+        store,
+        run_id=run_id,
+        subject_ids=[str(herb.get("canonical_id") or "")],
+        predicates=risk_predicates,
+    )
+    extra_items = _evidence_items(extra_rows)
+    seen = {item.evidence_id for item in items}
+    items.extend(item for item in extra_items if item.evidence_id not in seen)
+    if extra_rows:
+        subgraph = _merge_subgraphs(
+            subgraph, _fact_rows_to_subgraph(extra_rows, [herb])
+        )
+    if not items:
         return (
             [],
-            {"nodes": [], "edges": []},
+            subgraph,
             {},
             [f"{herb['name']} 没有 ACTIVE 属性事实"],
         )
-    selected_slots = [
-        slot for slot in card.slots if slot.predicate in plan.allowed_predicates
-    ]
-    evidence_ids = [
-        evidence_id for slot in selected_slots for evidence_id in slot.evidence_ids
-    ]
-    evidence = _load_evidence_for_ids(store, evidence_ids)
-    items = _evidence_items(evidence)
     trace = {
-        "herb_id": card.canonical_id,
-        "selected_slots": [slot.predicate for slot in selected_slots],
+        "herb_id": (card.canonical_id if card else herb.get("canonical_id")),
+        "selected_slots": selected_slots,
+        "assertion_predicates": list(risk_predicates),
+        "assertion_items": len(extra_items),
     }
-    return items, card.subgraph, trace, []
+    return items, subgraph, trace, []
 
 
 def _retrieve_reverse(
@@ -174,15 +366,26 @@ def _retrieve_reverse(
 
 def _retrieve_intersection(
     store: Neo4jStore,
+    linked: list[dict],
     plan: RetrievalPlan,
     run_id: str,
     settings: RetrievalSettings,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    names_by_id = {
+        str(item.get("canonical_id")): item.get("name") or item.get("preferred_name")
+        for item in linked
+        if item.get("canonical_id")
+    }
+    constraint_names = [
+        str(names_by_id.get(entity_id) or "")
+        for entity_id in plan.linked_entity_ids
+    ]
     rows = serving_read.find_herbs_by_constraints(
         store,
         list(plan.linked_entity_ids),
         run_id=run_id,
         limit=settings.directed_result_limit,
+        constraint_names=constraint_names,
     )
     evidence_ids = [item for row in rows for item in (row.get("evidence_ids") or [])]
     scores = {
@@ -234,6 +437,20 @@ def _retrieve_compare(
     )
     allowed = set(plan.allowed_predicates)
     rows = [row for row in rows if row.get("predicate") in allowed]
+    extra_rows = _load_assertion_facts(
+        store,
+        run_id=run_id,
+        subject_ids=entity_ids,
+        predicates=_high_risk_predicates(plan),
+    )
+    seen_ids = {
+        str(row.get("assertion_id") or row.get("evidence_id") or "") for row in rows
+    }
+    for row in extra_rows:
+        evidence_id = str(row.get("assertion_id") or "")
+        if evidence_id and evidence_id not in seen_ids:
+            rows.append(row)
+            seen_ids.add(evidence_id)
     section_rows = serving_read.load_entity_sections(
         store, entity_ids, run_id=run_id, limit=settings.comparison_chunk_limit
     )
@@ -246,8 +463,11 @@ def _retrieve_compare(
     items = _evidence_items(rows) + _evidence_items(summaries)
     slots: dict[str, dict[str, list[str]]] = {}
     for row in rows:
+        object_name = row.get("object_name")
+        if not object_name:
+            object_name = (row.get("quote") or row.get("evidence_quote") or "")[:24]
         slots.setdefault(row["predicate"], {}).setdefault(row["subject_id"], []).append(
-            row["object_name"]
+            object_name
         )
     return (
         items,
@@ -279,7 +499,10 @@ def _retrieve_path(
         max_hops=plan.max_hops,
         limit=settings.path_limit,
     )
-    paths = sorted(paths, key=_path_score, reverse=True)
+    assertion_paths = _assertion_paths_between(
+        store, plan, run_id, settings.path_limit
+    )
+    paths = sorted(paths + assertion_paths, key=_path_score, reverse=True)
     evidence_ids: list[str] = []
     score_by_evidence: dict[str, float] = {}
     path_by_evidence: dict[str, list[dict]] = {}
@@ -357,13 +580,21 @@ def retrieve(
     handlers: dict[
         str, Callable[[], tuple[list[EvidenceItem], dict, dict, list[str]]]
     ] = {
-        "attr": lambda: _retrieve_attr(store, ontology, linked, plan, active_run_id),
+        "attr": lambda: (
+            _retrieve_incompatibilities(store, linked, plan, active_run_id)
+            if _is_incompat_plan(plan)
+            else _retrieve_attr(store, ontology, linked, plan, active_run_id)
+        ),
         "reverse": lambda: _retrieve_reverse(store, linked, active_run_id, settings),
         "intersect": lambda: _retrieve_intersection(
-            store, plan, active_run_id, settings
+            store, linked, plan, active_run_id, settings
         ),
-        "compare": lambda: _retrieve_compare(
-            store, linked, plan, active_run_id, question, settings
+        "compare": lambda: (
+            _retrieve_incompatibilities(store, linked, plan, active_run_id)
+            if _is_incompat_plan(plan)
+            else _retrieve_compare(
+                store, linked, plan, active_run_id, question, settings
+            )
         ),
         "path": lambda: _retrieve_path(store, plan, active_run_id, settings),
         "fallback": lambda: _retrieve_fallback(question, fallback_retriever),
@@ -463,11 +694,70 @@ def _constraint_rows_to_subgraph(rows: list[dict], constraint_ids: list[str]) ->
     }
 
 
+def _merge_subgraphs(left: dict, right: dict) -> dict:
+    nodes = {node["id"]: node for node in (left.get("nodes") or []) if node.get("id")}
+    edges = list(left.get("edges") or [])
+    for node in right.get("nodes") or []:
+        if node.get("id"):
+            nodes.setdefault(node["id"], node)
+    for edge in right.get("edges") or []:
+        if edge not in edges:
+            edges.append(edge)
+    return {"nodes": list(nodes.values()), "edges": edges}
+
+
+def _assertion_paths_between(
+    store: Neo4jStore,
+    plan: RetrievalPlan,
+    run_id: str,
+    limit: int,
+) -> list[dict]:
+    """1-hop assertion paths that serving projection cannot see (NEGATIVE 十八反)."""
+    endpoints = list(plan.linked_entity_ids[:4])
+    if len(endpoints) < 2:
+        return []
+    rows = load_assertion_edges_between(
+        store,
+        run_id=run_id,
+        endpoint_ids=endpoints,
+        predicates=_high_risk_predicates(plan) or TASK_HIGH_RISK_PREDICATES,
+        limit=limit,
+    )
+    paths: list[dict] = []
+    for row in rows:
+        subject_id = row.get("subject_id")
+        object_id = row.get("object_id")
+        if not subject_id or not object_id:
+            continue
+        paths.append(
+            {
+                "nodes": [
+                    {
+                        "id": subject_id,
+                        "name": row.get("subject_name") or subject_id,
+                        "type": "HERB",
+                    },
+                    {
+                        "id": object_id,
+                        "name": row.get("object_name") or object_id,
+                        "type": row.get("object_type") or "HERB",
+                    },
+                ],
+                "predicates": [row["predicate"]],
+                "edge_source_ids": [subject_id],
+                "edge_target_ids": [object_id],
+                "evidence_id_groups": [[row["assertion_id"]]],
+                "edge_scores": [float(row.get("final_score") or 0.0)],
+            }
+        )
+    return paths
+
+
 def _fact_rows_to_subgraph(rows: list[dict], linked: list[dict]) -> dict:
     nodes = {
         item["canonical_id"]: {
             "id": item["canonical_id"],
-            "label": item["name"],
+            "label": item.get("name") or item.get("preferred_name"),
             "type": item["entity_type"],
         }
         for item in linked
@@ -475,14 +765,17 @@ def _fact_rows_to_subgraph(rows: list[dict], linked: list[dict]) -> dict:
     }
     edges: list[dict] = []
     for row in rows:
-        nodes[row["object_id"]] = {
-            "id": row["object_id"],
-            "label": row["object_name"],
+        object_id = row.get("object_id")
+        if not object_id:
+            continue
+        nodes[object_id] = {
+            "id": object_id,
+            "label": row.get("object_name") or object_id,
             "type": row.get("object_type") or "ENTITY",
         }
         edge = {
             "source": row["subject_id"],
-            "target": row["object_id"],
+            "target": object_id,
             "type": row["predicate"],
         }
         if edge not in edges:

@@ -113,6 +113,39 @@ ORDER BY size(matched_ids) DESC, best_score DESC, herb
 LIMIT $limit
 """
 
+_INTERSECTION_BY_NAME = """
+UNWIND $names AS name
+MATCH (target:Entity)
+WHERE target.entity_type IN ['EFFICACY', 'INDICATION']
+  AND target.preferred_name IS NOT NULL
+  AND size(name) >= 2
+  AND (
+    target.preferred_name CONTAINS name
+    OR (size(target.preferred_name) >= 2 AND name CONTAINS target.preferred_name)
+  )
+MATCH (h:Entity {entity_type: 'HERB'})-[e]->(target)
+WHERE e.fact_key IS NOT NULL AND e.active_run_id = $run
+  AND type(e) IN ['HAS_EFFICACY', 'TREATS']
+WITH h,
+     collect(DISTINCT {
+       target_id: target.canonical_id, target_name: target.preferred_name,
+       target_type: target.entity_type, predicate: type(e)
+     }) AS matches,
+     collect(DISTINCT e) AS edges
+WITH h, matches,
+     [match IN matches | match.target_id] AS matched_ids,
+     [match IN matches | match.target_name] AS matched_names,
+     reduce(ids = [], edge IN edges | ids + coalesce(edge.evidence_ids, [])) AS evidence_ids,
+     [edge IN edges WHERE edge.page_start IS NOT NULL | edge.page_start] AS pages,
+     reduce(best = 0.0, edge IN edges |
+       CASE WHEN coalesce(edge.best_support_score, 0.0) > best
+            THEN edge.best_support_score ELSE best END) AS best_score
+RETURN h.preferred_name AS herb, h.canonical_id AS herb_id,
+       matches, matched_ids, matched_names, evidence_ids, pages, best_score
+ORDER BY size(matched_ids) DESC, best_score DESC, herb
+LIMIT $limit
+"""
+
 _ENTITY_FACTS = """
 UNWIND $entity_ids AS entity_id
 MATCH (subject:Entity {canonical_id: entity_id})-[edge]->(object:Entity)
@@ -244,7 +277,7 @@ def get_herb_card(
         if slot:
             slot.values = slot.values[:max_values_per_slot]
             slot.pages = sorted(slot.pages)[:8]
-            slot.evidence_ids = slot.evidence_ids[:6]
+            slot.evidence_ids = slot.evidence_ids[:16]
             ordered.append(slot)
     ordered.extend(grouped.values())  # 本体新增谓词也不丢
 
@@ -351,17 +384,69 @@ def find_herbs_by_effect(
     return store.run(_REVERSE, name=name.strip(), run=run_id, limit=limit)
 
 
+def _name_covers_constraint(target_name: str, constraint_name: str) -> bool:
+    if not target_name or not constraint_name:
+        return False
+    return constraint_name in target_name or target_name in constraint_name
+
+
+def _remap_compound_intersection(
+    rows: list[dict],
+    constraint_ids: list[str],
+    constraint_names: list[str],
+    limit: int,
+) -> list[dict]:
+    """Map compound efficacy nodes (补气利水) back onto asked atomic constraints."""
+    remapped: list[dict] = []
+    for row in rows:
+        matched_ids: list[str] = []
+        matched_names: list[str] = []
+        matches: list[dict] = []
+        for match in row.get("matches") or []:
+            target_name = match.get("target_name") or ""
+            for constraint_id, constraint_name in zip(
+                constraint_ids, constraint_names, strict=False
+            ):
+                if constraint_id in matched_ids:
+                    continue
+                if not _name_covers_constraint(target_name, constraint_name):
+                    continue
+                matched_ids.append(constraint_id)
+                matched_names.append(constraint_name)
+                matches.append(dict(match))
+        if not matched_ids:
+            continue
+        item = dict(row)
+        item["matched_ids"] = matched_ids
+        item["matched_names"] = matched_names
+        item["matches"] = matches
+        item["coverage"] = len(matched_ids) / len(constraint_ids)
+        item["exact_match"] = len(matched_ids) == len(constraint_ids)
+        remapped.append(item)
+    remapped.sort(
+        key=lambda item: (
+            -float(item.get("coverage") or 0.0),
+            -float(item.get("best_score") or 0.0),
+            item.get("herb") or "",
+        )
+    )
+    return remapped[:limit]
+
+
 def find_herbs_by_constraints(
     store: Neo4jStore,
     constraint_ids: list[str],
     *,
     run_id: str,
     limit: int = 25,
+    constraint_names: list[str] | None = None,
 ) -> list[dict]:
     """Find herbs matching all constraints first, followed by partial coverage.
 
-    This is a hard neighborhood intersection. Partial rows are explicitly marked and are
-    never promoted to asserted facts.
+    Exact canonical_id intersection is preferred. If that yields no full match
+    and display names are provided, a second pass treats compound efficacy
+    nodes (e.g. 补气利水) as covering the asked atomic names (补气, 利水).
+    Partial rows stay marked and are never promoted to asserted facts.
     """
     unique_ids = list(dict.fromkeys(item for item in constraint_ids if item))
     if len(unique_ids) < 2:
@@ -377,6 +462,19 @@ def find_herbs_by_constraints(
         matched = len(set(row.get("matched_ids") or []))
         row["coverage"] = matched / len(unique_ids)
         row["exact_match"] = matched == len(unique_ids)
+    names = [name for name in (constraint_names or []) if name]
+    if names and not any(row.get("exact_match") for row in rows):
+        name_rows = store.run(
+            _INTERSECTION_BY_NAME,
+            names=names,
+            run=run_id,
+            limit=limit,
+        )
+        remapped = _remap_compound_intersection(
+            name_rows, unique_ids, names, limit
+        )
+        if remapped:
+            return remapped
     return rows
 
 

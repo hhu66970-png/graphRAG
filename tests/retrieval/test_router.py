@@ -120,6 +120,60 @@ def test_path_is_bounded_to_three_hops():
     assert "FROM_CHUNK" not in plan.allowed_predicates
 
 
+def test_two_herbs_without_compare_words_still_retrieve_both():
+    plan = route_query(
+        "人参和黄芪的性味功效是什么？",
+        [
+            _entity("人参", "HERB", "renshen"),
+            _entity("黄芪", "HERB", "huangqi"),
+        ],
+    )
+
+    assert plan.intent == "compare"
+    assert plan.linked_entity_ids == ("HERB:renshen", "HERB:huangqi")
+    assert "HAS_NATURE_FLAVOR" in plan.allowed_predicates
+    assert "HAS_EFFICACY" in plan.allowed_predicates
+
+
+def test_reverse_with_two_constraints_becomes_intersection():
+    plan = route_query(
+        "哪些药具有清热解毒和凉血功效？",
+        [
+            _entity("清热解毒", "EFFICACY", "qingre"),
+            _entity("凉血", "EFFICACY", "liangxue"),
+        ],
+    )
+
+    assert plan.intent == "intersect"
+    assert plan.linked_entity_ids == ("EFFICACY:qingre", "EFFICACY:liangxue")
+
+
+def test_shared_incompatibility_routes_both_herbs():
+    plan = route_query(
+        "人参和麻黄均不能同时和什么药搭配使用",
+        [
+            _entity("人参", "HERB", "renshen"),
+            _entity("麻黄", "HERB", "mahuang"),
+        ],
+    )
+
+    assert plan.intent == "compare"
+    assert plan.linked_entity_ids == ("HERB:renshen", "HERB:mahuang")
+    assert plan.allowed_predicates == ("INCOMPATIBLE_WITH",)
+    assert plan.is_high_risk is True
+
+
+def test_single_herb_incompatibility_stays_attr():
+    plan = route_query(
+        "人参不宜与什么药同用？",
+        [_entity("人参", "HERB", "renshen")],
+    )
+
+    assert plan.intent == "attr"
+    assert plan.linked_entity_ids == ("HERB:renshen",)
+    assert plan.allowed_predicates == ("INCOMPATIBLE_WITH",)
+
+
 def test_blank_question_is_rejected():
     with pytest.raises(ValueError, match="question"):
         route_query("  ", [])

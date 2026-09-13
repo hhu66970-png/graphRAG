@@ -405,8 +405,108 @@ def test_read_is_scoped_by_run_and_limit():
     call = reads[0]
     assert call["run"] == "run-test"
     assert call["limit"] > 0
-    assert set(call["predicates"]) <= {"HAS_DOSAGE", "CONTRAINDICATED_IN", "INCOMPATIBLE_WITH"}
+    assert list(call["predicates"]) == ["HAS_DOSAGE"]
     assert call["predicates"], "必须限定谓词白名单"
     assert call["subject_ids"] == [MAHUANG], call["subject_ids"]
     # 主语完整性核对同样必须限定在 ACTIVE 批次内，不能跨批次查实体。
     assert all(item["run"] == "run-test" for item in store.calls), store.calls
+
+
+def test_toxic_dose_question_does_not_answer_with_unrelated_contraindication():
+    """「使用多少会中毒」不得用过敏体质忌用顶替，并标成已核验。"""
+    rows = [
+        assertion_row(
+            assertion_id="a-allergy",
+            predicate="CONTRAINDICATED_IN",
+            polarity="NEGATIVE",
+            subject_id="H:蜈蚣",
+            subject_name="蜈蚣",
+            object_id="P:过敏体质",
+            object_name="过敏体质忌用",
+            evidence_quote="过敏体质者忌用。",
+            chunk_texts=["过敏体质者忌用。"],
+            chunk_page_starts=[367],
+            chunk_page_ends=[368],
+        )
+    ]
+    answer = service_for(rows).answer(
+        "蜈蚣使用多少会中毒？",
+        linked_entities=linked_herb("蜈蚣", "H:蜈蚣"),
+    )
+
+    assert answer.status is AnswerStatus.ABSTAIN
+    assert "过敏" not in answer.answer_text
+    assert not answer.claims
+
+
+def test_toxic_dose_question_does_not_treat_regular_dosage_as_threshold():
+    """只有常规用量、没有中毒剂量时，不得把煎服克数说成已核验的中毒阈值。"""
+    rows = [dosage_row("a1", "煎服，1～3g。", quote="蜈蚣煎服，1～3g。", subject_id="H:蜈蚣", subject_name="蜈蚣")]
+    answer = service_for(rows).answer(
+        "蜈蚣使用多少会中毒？",
+        linked_entities=linked_herb("蜈蚣", "H:蜈蚣"),
+    )
+
+    assert answer.status is AnswerStatus.PARTIAL_GROUNDED
+    assert "1～3g" in answer.answer_text
+    assert "中毒剂量" in "；".join(item.reason for item in answer.sub_questions)
+    assert answer.sub_questions[0].status is AnswerStatus.PARTIAL_GROUNDED
+
+
+def test_shared_incompat_question_does_not_invent_common_partner():
+    """两味药「均不能搭配」时，不得把人参反藜芦说成麻黄也反藜芦。"""
+    from graphragexpr.highrisk.service import (
+        categories_of,
+        is_high_risk_question,
+    )
+    from graphragexpr.domain.high_risk import RiskCategory
+
+    question = "人参和麻黄均不能同时和什么药搭配使用"
+    assert is_high_risk_question(question) is True
+    assert RiskCategory.INCOMPATIBILITY in categories_of(question)
+    assert RiskCategory.DOSAGE not in categories_of(question)
+
+    rows = [
+        assertion_row(
+            assertion_id="a-rs",
+            predicate="INCOMPATIBLE_WITH",
+            polarity="NEGATIVE",
+            subject_id="H:人参",
+            subject_name="人参",
+            object_id="H:藜芦",
+            object_name="藜芦",
+            evidence_quote="不宜与藜芦同用。",
+            chunk_texts=["不宜与藜芦同用。"],
+            page_start=379,
+            page_end=379,
+            chunk_page_starts=[379],
+            chunk_page_ends=[379],
+        )
+    ]
+    answer = service_for(rows).answer(
+        question,
+        linked_entities=[
+            {"canonical_id": "H:人参", "entity_type": "HERB", "name": "人参"},
+            {"canonical_id": "H:麻黄", "entity_type": "HERB", "name": "麻黄"},
+        ],
+    )
+
+    notes = "；".join(answer.coverage_notes)
+    assert "藜芦" in answer.answer_text
+    assert "麻黄" in answer.answer_text
+    assert "未记载配伍禁忌" in answer.answer_text
+    assert "共同" in answer.answer_text
+    assert "麻黄" in notes
+    assert answer.status is AnswerStatus.PARTIAL_GROUNDED
+
+    store = FakeHighRiskStore(rows)
+    HighRiskService(store, run_id="run-test").answer(
+        question,
+        linked_entities=[
+            {"canonical_id": "H:人参", "entity_type": "HERB", "name": "人参"},
+            {"canonical_id": "H:麻黄", "entity_type": "HERB", "name": "麻黄"},
+        ],
+    )
+    predicate_reads = [item for item in store.calls if "predicates" in item]
+    assert predicate_reads
+    assert list(predicate_reads[0]["predicates"]) == ["INCOMPATIBLE_WITH"]

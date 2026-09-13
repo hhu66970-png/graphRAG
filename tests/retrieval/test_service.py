@@ -93,3 +93,169 @@ def test_intersection_subgraph_uses_real_serving_predicate():
             "type": "HAS_EFFICACY",
         }
     ]
+
+
+def test_incompatibility_compare_reads_assertions_not_serving_edges(monkeypatch):
+    linked = [
+        {"canonical_id": "HERB:renshen", "name": "人参", "entity_type": "HERB"},
+        {"canonical_id": "HERB:mahuang", "name": "麻黄", "entity_type": "HERB"},
+    ]
+    serving_calls = []
+    monkeypatch.setattr(service.serving_read, "active_run", lambda store: "run-1")
+    monkeypatch.setattr(
+        service.serving_read,
+        "link_entities_in_text",
+        lambda store, text, **kwargs: linked,
+    )
+    monkeypatch.setattr(
+        service.serving_read,
+        "load_entity_facts",
+        lambda *args, **kwargs: serving_calls.append("facts") or [],
+    )
+    monkeypatch.setattr(
+        service.serving_read,
+        "get_herb_card",
+        lambda *args, **kwargs: serving_calls.append("card") or None,
+    )
+
+    def fake_load(store, *, run_id, subject_ids, predicates, limit=60):
+        assert run_id == "run-1"
+        assert set(subject_ids) == {"HERB:renshen", "HERB:mahuang"}
+        assert predicates == ("INCOMPATIBLE_WITH",)
+        return [
+            {
+                "assertion_id": "a-rs",
+                "fact_key": "fk-rs",
+                "predicate": "INCOMPATIBLE_WITH",
+                "subject_id": "HERB:renshen",
+                "subject_name": "人参",
+                "object_id": "HERB:lilu",
+                "object_name": "藜芦",
+                "evidence_quote": "人参反藜芦。",
+                "chunk_ids": ["c1"],
+                "page_start": 379,
+                "page_end": 379,
+                "final_score": 0.9,
+            }
+        ]
+
+    monkeypatch.setattr(service, "load_high_risk_assertions", fake_load)
+
+    result = service.retrieve(
+        object(),
+        load_ontology(),
+        "人参和麻黄均不能同时和什么药搭配使用",
+    )
+
+    assert serving_calls == []
+    assert result.packet.intent == "compare"
+    assert [item.predicate for item in result.packet.items] == ["INCOMPATIBLE_WITH"]
+    assert result.packet.items[0].qualifiers["subject_name"] == "人参"
+    assert result.packet.items[0].qualifiers["object_name"] == "藜芦"
+    warnings = "；".join(result.packet.warnings)
+    assert "麻黄" in warnings
+    assert "共同" in warnings
+    assert result.packet.trace["incompatibility_by_herb"]["人参"] == ["藜芦"]
+    assert result.packet.trace["incompatibility_by_herb"]["麻黄"] == []
+    assert result.packet.trace["shared_incompatible_objects"] == []
+
+
+def test_attr_dosage_reads_assertions_when_serving_card_empty(monkeypatch):
+    linked = [{"canonical_id": "HERB:fuzi", "name": "附子", "entity_type": "HERB"}]
+    monkeypatch.setattr(service.serving_read, "active_run", lambda store: "run-1")
+    monkeypatch.setattr(
+        service.serving_read,
+        "link_entities_in_text",
+        lambda store, text, **kwargs: linked,
+    )
+    monkeypatch.setattr(service.serving_read, "get_herb_card", lambda *args, **kwargs: None)
+
+    def fake_load(store, *, run_id, subject_ids, predicates, limit=60):
+        assert "HAS_DOSAGE" in predicates
+        assert subject_ids == ["HERB:fuzi"]
+        return [
+            {
+                "assertion_id": "a-dose",
+                "fact_key": "fk-dose",
+                "predicate": "HAS_DOSAGE",
+                "subject_id": "HERB:fuzi",
+                "subject_name": "附子",
+                "object_id": None,
+                "object_name": None,
+                "evidence_quote": "煎服，3～15g。",
+                "chunk_ids": ["c1"],
+                "page_start": 236,
+                "page_end": 236,
+                "final_score": 0.9,
+            }
+        ]
+
+    monkeypatch.setattr(service, "load_high_risk_assertions", fake_load)
+
+    result = service.retrieve(object(), load_ontology(), "附子的用量是多少？")
+
+    assert result.packet.intent == "attr"
+    assert result.packet.items[0].predicate == "HAS_DOSAGE"
+    assert "3～15g" in result.packet.items[0].evidence_quote
+
+
+def test_path_reads_assertion_edges_when_serving_has_none(monkeypatch):
+    linked = [
+        {"canonical_id": "HERB:gancao", "name": "甘草", "entity_type": "HERB"},
+        {"canonical_id": "HERB:yuanhua", "name": "芫花", "entity_type": "HERB"},
+    ]
+    monkeypatch.setattr(service.serving_read, "active_run", lambda store: "run-1")
+    monkeypatch.setattr(
+        service.serving_read,
+        "link_entities_in_text",
+        lambda store, text, **kwargs: linked,
+    )
+    monkeypatch.setattr(
+        service.serving_read, "find_supported_paths", lambda *args, **kwargs: []
+    )
+    monkeypatch.setattr(
+        service,
+        "load_assertion_edges_between",
+        lambda store, **kwargs: [
+            {
+                "assertion_id": "a-fan",
+                "predicate": "INCOMPATIBLE_WITH",
+                "subject_id": "HERB:gancao",
+                "subject_name": "甘草",
+                "object_id": "HERB:yuanhua",
+                "object_name": "芫花",
+                "object_type": "HERB",
+                "evidence_quote": "甘草反芫花。",
+                "final_score": 0.88,
+                "chunk_ids": ["c9"],
+                "page_start": 64,
+                "page_end": 64,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        service.serving_read,
+        "load_evidence",
+        lambda store, ids: [
+            {
+                "assertion_id": "a-fan",
+                "quote": "甘草反芫花。",
+                "predicate": "INCOMPATIBLE_WITH",
+                "subject_id": "HERB:gancao",
+                "subject_name": "甘草",
+                "object_id": "HERB:yuanhua",
+                "object_name": "芫花",
+                "chunk_ids": ["c9"],
+                "page_start": 64,
+                "page_end": 64,
+                "support_score": 0.88,
+            }
+        ],
+    )
+
+    result = service.retrieve(object(), load_ontology(), "甘草与芫花如何关联？")
+
+    assert result.packet.intent == "path"
+    assert result.packet.items[0].predicate == "INCOMPATIBLE_WITH"
+    assert result.packet.trace["path_count"] == 1
+    assert result.subgraph["edges"][0]["type"] == "INCOMPATIBLE_WITH"

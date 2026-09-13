@@ -44,34 +44,18 @@ from .conftest import (
 
 #: method → （检索家族, 该 method 自己的检索参数）。
 #: 参数必须与 `backend/api.py` 的 `_NATIVE_METHODS` 一致；不一致时本用例失败，
-#: 这样「六种 method 名义不同、实际全忽略」不可能悄悄发生。
+#: 这样「三种 method 名义不同、实际全忽略」不可能悄悄发生。
 METHOD_TABLE = [
     ("auto", "auto", None),
-    ("kg_v2", "auto", None),
     (
         "keyword_graph",
         "native",
-        {"use_fulltext": True, "use_vector": None, "expand_graph": True},
+        {"use_fulltext": True, "use_vector": False, "expand_graph": True},
     ),
     (
         "vector",
         "native",
         {"use_fulltext": False, "use_vector": True, "expand_graph": False},
-    ),
-    (
-        "vector_cypher",
-        "native",
-        {"use_fulltext": False, "use_vector": True, "expand_graph": True},
-    ),
-    (
-        "hybrid",
-        "native",
-        {"use_fulltext": True, "use_vector": True, "expand_graph": False},
-    ),
-    (
-        "hybrid_cypher",
-        "native",
-        {"use_fulltext": True, "use_vector": True, "expand_graph": True},
     ),
 ]
 
@@ -116,7 +100,7 @@ def test_high_risk_answer_does_not_depend_on_the_normal_llm(
 def test_selected_method_runs_its_own_retrieval(client, wire, method, family, params):
     """用户选的 method 必须真的决定跑哪条检索、用什么参数。
 
-    否则「六种 method」就只是名字不同，用户在不知情的情况下拿到的其实是
+    否则「三种 method」就只是名字不同，用户在不知情的情况下拿到的其实是
     另一种检索的证据。这里两种检索各自留调用记录，谁跑了、带什么参数都可断言。
     """
     wiring = wire(rows=dosage_rows())
@@ -271,7 +255,7 @@ def test_native_retrieval_only_positions_the_subject_not_the_evidence(client, wi
     assert first["evidence_units"] and second["evidence_units"]
     assert first["retrieval"]["items"] == second["retrieval"]["items"] == 1
     # 检索参数确实不同（vector 打开了向量通道，keyword_graph 没有）
-    assert first["retrieval"]["params"]["use_vector"] is None
+    assert first["retrieval"]["params"]["use_vector"] is False
     assert second["retrieval"]["params"]["use_vector"] is True
 
     # 证据、结论、子图逐项一致
@@ -385,7 +369,7 @@ def test_benign_question_keeps_the_original_chain(
             {
                 "question": BENIGN_QUESTION,
                 "use_fulltext": True,
-                "use_vector": None,
+                "use_vector": False,
                 "expand_graph": True,
             }
         ]

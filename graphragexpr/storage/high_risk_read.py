@@ -247,6 +247,60 @@ def load_assertions_by_ids(
     return rows
 
 
+_LOAD_EDGES_BETWEEN = """
+MATCH (a:Assertion {run_id: $run})
+WHERE a.predicate IN $predicates
+  AND a.validation_status = 'ACCEPTED'
+MATCH (a)-[:SUBJECT]->(subject:Entity)
+MATCH (a)-[:OBJECT]->(object:Entity)
+WHERE subject.canonical_id IN $endpoint_ids
+  AND object.canonical_id IN $endpoint_ids
+  AND subject.canonical_id <> object.canonical_id
+OPTIONAL MATCH (a)-[:EVIDENCED_BY]->(chunk:Chunk)
+WITH a, subject, object, collect(DISTINCT chunk) AS chunks
+RETURN a.assertion_id        AS assertion_id,
+       a.fact_key            AS fact_key,
+       a.predicate           AS predicate,
+       a.evidence_quote      AS evidence_quote,
+       a.final_score         AS final_score,
+       a.page_start          AS page_start,
+       a.page_end            AS page_end,
+       subject.canonical_id  AS subject_id,
+       subject.preferred_name AS subject_name,
+       object.canonical_id   AS object_id,
+       object.preferred_name AS object_name,
+       object.entity_type    AS object_type,
+       [chunk IN chunks | chunk.chunk_id] AS chunk_ids
+ORDER BY a.final_score DESC, a.assertion_id
+LIMIT $limit
+"""
+
+
+def load_assertion_edges_between(
+    store: Neo4jStore,
+    *,
+    run_id: str,
+    endpoint_ids: list[str],
+    predicates: tuple[str, ...] = TASK_HIGH_RISK_PREDICATES,
+    limit: int = 40,
+) -> list[dict]:
+    """Direct assertion-layer edges whose both ends are the given entities.
+
+    Serving paths cannot see NEGATIVE incompatibilities. This is the 1-hop
+    fallback for questions such as 甘草与芫花十八反.
+    """
+    unique = list(dict.fromkeys(item for item in endpoint_ids if item))
+    if len(unique) < 2:
+        return []
+    return store.run(
+        _LOAD_EDGES_BETWEEN,
+        run=run_id,
+        predicates=list(predicates),
+        endpoint_ids=unique,
+        limit=max(1, int(limit)),
+    )
+
+
 def load_chunks(store: Neo4jStore, chunk_ids: list[str]) -> list[dict]:
     """Load chunk text for the text-evidence channel (向量／全文命中的原文)."""
     unique = list(dict.fromkeys(item for item in chunk_ids if item))

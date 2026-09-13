@@ -167,6 +167,21 @@ def interpret_polarity(
             matched_cues=relation_negations,
         )
 
+    if predicate == "INCOMPATIBLE_WITH" and object_name:
+        reverse_cue = f"反{object_name}"
+        if reverse_cue in quote or "相反" in quote:
+            cue = reverse_cue if reverse_cue in quote else "相反"
+            return PolarityInterpretation(
+                verdict=PolarityVerdict.RELATION_HOLDS,
+                basis=(
+                    f"原文以十八反／相反句式肯定关于{target}的配伍禁忌"
+                    f"（线索：「{cue}」）"
+                ),
+                ambiguous=False,
+                raw_polarity=normalized_polarity,
+                matched_cues=(cue,),
+            )
+
     act_negations = _first_match(quote, _NEGATED_ACT_CUES)
     if act_negations:
         polarity_note = (

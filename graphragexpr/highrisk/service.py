@@ -95,13 +95,46 @@ _SUB_QUESTION_SPLIT_RE = re.compile(r"[？?；;。]+")
 _CATEGORY_TERMS: tuple[tuple[RiskCategory, tuple[str, ...]], ...] = (
     (
         RiskCategory.INCOMPATIBILITY,
-        ("配伍禁忌", "十八反", "十九畏", "相反", "相畏", "相恶", "同用", "合用", "配伍"),
+        (
+            "配伍禁忌",
+            "十八反",
+            "十九畏",
+            "相反",
+            "相畏",
+            "相恶",
+            "同用",
+            "合用",
+            "配伍",
+            "不能同时",
+            "不能搭配",
+            "不能同用",
+            "不宜同用",
+            "不可同用",
+            "不宜与",
+            "不可与",
+        ),
     ),
     (
         RiskCategory.CONTRAINDICATION,
         ("禁忌", "禁用", "忌用", "慎用", "孕妇", "妊娠", "儿童", "小儿", "不良反应", "不宜"),
     ),
-    (RiskCategory.DOSAGE, ("剂量", "用量", "用法", "服用", "煎服", "多少克", "吃多少")),
+    (
+        RiskCategory.DOSAGE,
+        (
+            "剂量",
+            "用量",
+            "用法",
+            "服用",
+            "煎服",
+            "多少克",
+            "吃多少",
+            "用多少",
+            "使用多少",
+            "多少会",
+            "中毒",
+            "中毒量",
+        ),
+    ),
 )
 _ALL_CATEGORIES: tuple[RiskCategory, ...] = (
     RiskCategory.DOSAGE,
@@ -122,6 +155,8 @@ _EXTRA_HIGH_RISK_TERMS: tuple[str, ...] = (
     # 收「相畏」「十九畏」而不收单字「畏」：「畏寒」「畏光」是常见症状描述，
     # 单字会把它误判成高风险问题。
     "同用", "合用", "配伍", "十八反", "十九畏",
+    "不能同时", "不能搭配", "不能同用", "不宜同用", "不可同用",
+    "不宜与", "不可与",
     "禁用", "禁服", "切忌",
     "妊娠", "哺乳", "小儿", "新生儿", "婴幼儿",
     "不宜",
@@ -151,6 +186,100 @@ def is_high_risk_question(question: str, *, plan: object | None = None) -> bool:
     )
 
 
+_SHARED_INCOMPAT_TERMS = (
+    "均不能",
+    "都不能",
+    "均不宜",
+    "都不宜",
+    "均不可",
+    "都不可",
+    "都忌",
+    "均忌",
+)
+
+
+def _asks_shared_incompatibility(question: str) -> bool:
+    """问的是两味（及以上）药**共同**不能搭配的对象，而不是各药各自的禁忌。"""
+    normalized = "".join((question or "").split())
+    return any(term in normalized for term in _SHARED_INCOMPAT_TERMS)
+
+
+def _incompat_objects_by_subject(
+    subject_names: list[str], units: dict[str, ConditionalEvidenceUnit]
+) -> dict[str, set[str]]:
+    by_subject: dict[str, set[str]] = {name: set() for name in subject_names}
+    for unit in units.values():
+        if unit.predicate != "INCOMPATIBLE_WITH" or not unit.object_name:
+            continue
+        if unit.subject_name in by_subject:
+            by_subject[unit.subject_name].add(unit.object_name)
+    return by_subject
+
+
+def _incompatibility_coverage_notes(
+    question: str,
+    subject_names: list[str],
+    units: dict[str, ConditionalEvidenceUnit],
+) -> list[str]:
+    if not subject_names:
+        return []
+    if RiskCategory.INCOMPATIBILITY not in (categories_of(question) or ()):
+        return []
+    by_subject = _incompat_objects_by_subject(subject_names, units)
+    notes: list[str] = []
+    missing = [name for name, objects in by_subject.items() if not objects]
+    if missing:
+        notes.append("以下中药未检索到配伍禁忌证据：" + "、".join(missing))
+    if len(subject_names) < 2:
+        return notes
+    present = [name for name, objects in by_subject.items() if objects]
+    if len(present) == len(subject_names):
+        common = set.intersection(*(by_subject[name] for name in subject_names))
+        if common:
+            notes.append("共同不宜同用对象：" + "、".join(sorted(common)))
+            return notes
+    notes.append(
+        "现有证据中没有这些中药共同的不宜同用对象；"
+        "不得把单味药的禁忌推广为两药共有"
+    )
+    return notes
+
+
+def _incompatibility_answer_lines(
+    question: str,
+    subject_names: list[str],
+    units: dict[str, ConditionalEvidenceUnit],
+) -> list[str]:
+    """主回答里必须点名每一味药，不能只写有证据的那一味。"""
+    if not subject_names:
+        return []
+    if RiskCategory.INCOMPATIBILITY not in (categories_of(question) or ()):
+        return []
+    by_subject = _incompat_objects_by_subject(subject_names, units)
+    lines: list[str] = []
+    for name in subject_names:
+        if by_subject.get(name):
+            continue
+        lines.append(
+            f"{name}：现有证据未记载配伍禁忌，不能据此认为可以任意配伍。"
+        )
+    if len(subject_names) >= 2:
+        present = [name for name, objects in by_subject.items() if objects]
+        if len(present) == len(subject_names):
+            common = set.intersection(*(by_subject[name] for name in subject_names))
+            if common:
+                lines.append("共同不宜同用对象：" + "、".join(sorted(common)))
+            else:
+                lines.append(
+                    "两药没有共同的不宜同用对象，不得把单味药的禁忌推广为共有。"
+                )
+        else:
+            lines.append(
+                "两药没有共同的不宜同用对象，不得把单味药的禁忌推广为共有。"
+            )
+    return lines
+
+
 def categories_of(question: str) -> tuple[RiskCategory, ...]:
     """Detect which of the three risk categories a question touches.
 
@@ -173,6 +302,15 @@ def _predicates_for(categories: tuple[RiskCategory, ...]) -> tuple[str, ...]:
         for predicate, category in PREDICATE_CATEGORY.items()
         if category in effective
     )
+
+
+_TOXIC_DOSE_TERMS: tuple[str, ...] = ("中毒", "中毒量", "多少会中毒")
+
+
+def _is_toxic_dose_question(question: str) -> bool:
+    """问的是中毒剂量／中毒阈值，而不是常规用量或一般使用注意。"""
+    normalized = "".join((question or "").split())
+    return any(term in normalized for term in _TOXIC_DOSE_TERMS)
 
 
 def _split_sub_questions(question: str) -> list[str]:
@@ -550,6 +688,9 @@ class HighRiskService:
         injected_ids = [unit.unit_id for unit in injected]
 
         if not injected:
+            notes.extend(
+                _incompatibility_coverage_notes(question, subject_names, units_by_id)
+            )
             if subject_ids or object_ids:
                 reason = "未在 ACTIVE 批次中检索到这三类高风险关系的证据"
             elif is_enumeration_question(question):
@@ -651,6 +792,32 @@ class HighRiskService:
             )
             for sub_question in sub_questions
         ]
+        incompat_notes = _incompatibility_coverage_notes(
+            question, subject_names, units_by_id
+        )
+        notes.extend(incompat_notes)
+        no_shared = next(
+            (
+                note
+                for note in incompat_notes
+                if "没有这些中药共同的不宜同用对象" in note
+            ),
+            None,
+        )
+        if no_shared and _asks_shared_incompatibility(question):
+            sub_outcomes = [
+                (
+                    item.model_copy(
+                        update={
+                            "status": AnswerStatus.PARTIAL_GROUNDED,
+                            "reason": no_shared,
+                        }
+                    )
+                    if item.status is AnswerStatus.GROUNDED
+                    else item
+                )
+                for item in sub_outcomes
+            ]
         status = _overall_status(sub_outcomes)
 
         # 只有**适用于本问题对象与条件**的单元才作为结论输出。第一层核验通过
@@ -742,6 +909,9 @@ class HighRiskService:
             relevance=relevance_map,
             all_units=injected,
             sub_outcomes=sub_outcomes,
+            subject_gap_lines=_incompatibility_answer_lines(
+                question, subject_names, units_by_id
+            ),
         )
         if status is not AnswerStatus.GROUNDED:
             notes.append(NO_EVIDENCE_NOTE)
@@ -804,14 +974,20 @@ class HighRiskService:
         conflict_map: dict[str, str] | None = None,
     ) -> SubQuestionOutcome:
         sub_ids = units_by_sub.get(sub_question, [])
-        citable = [
+        categories = categories_of(sub_question)
+        category = categories[0] if categories else None
+        allowed = set(categories)
+        scoped_ids = [
             unit_id
             for unit_id in sub_ids
+            if not allowed or units_by_id[unit_id].risk_category in allowed
+        ]
+        citable = [
+            unit_id
+            for unit_id in scoped_ids
             if units_by_id[unit_id].is_citable()
         ]
         grounded_ids = [unit_id for unit_id in citable if unit_id in accepted_ids]
-        categories = categories_of(sub_question)
-        category = categories[0] if categories else None
 
         # 第二层核验：这些证据是否**回答了用户所问的对象和条件**。
         # grounded 不能只由「存在通过核验的证据单元」决定——那会把
@@ -844,6 +1020,24 @@ class HighRiskService:
                 claim_ids=[f"claim:{unit_id}" for unit_id in grounded_ids],
             )
 
+        if grounded_ids and _is_toxic_dose_question(sub_question):
+            toxic_ids = [
+                unit_id
+                for unit_id in grounded_ids
+                if "中毒" in (units_by_id[unit_id].evidence_quote or "")
+            ]
+            if not toxic_ids:
+                return SubQuestionOutcome(
+                    question=sub_question,
+                    risk_category=category,
+                    status=AnswerStatus.PARTIAL_GROUNDED,
+                    reason=(
+                        "教材未记载明确中毒剂量；下列仅为常规用量，"
+                        "不能当作中毒阈值，也不能用其他使用注意代替回答"
+                    ),
+                    unit_ids=grounded_ids,
+                    claim_ids=[f"claim:{unit_id}" for unit_id in grounded_ids],
+                )
         if grounded_ids:
             return SubQuestionOutcome(
                 question=sub_question,
@@ -1030,6 +1224,7 @@ def _compose_answer(
     relevance: dict[str, Relevance],
     all_units: list[ConditionalEvidenceUnit],
     sub_outcomes: list[SubQuestionOutcome],
+    subject_gap_lines: list[str] | None = None,
 ) -> tuple[str, list[AnswerBlock]]:
     """按状态组装最终文字与展示分块（任务书第三部分 §7）。
 
@@ -1079,6 +1274,11 @@ def _compose_answer(
             )
             parts.append(text)
 
+        if subject_gap_lines:
+            text = "\n".join(f"- {line}" for line in subject_gap_lines)
+            blocks.append(AnswerBlock(kind=AnswerBlockKind.CONCLUSION, text=text))
+            parts.append(text)
+
         if shown_units:
             for unit in shown_units:
                 blocks.append(
@@ -1093,7 +1293,11 @@ def _compose_answer(
                 "\n".join(render_quote_line(unit) for unit in shown_units)
             )
 
-        if status is AnswerStatus.PARTIAL_GROUNDED and reasons:
+        if (
+            status is AnswerStatus.PARTIAL_GROUNDED
+            and reasons
+            and not subject_gap_lines
+        ):
             note = f"未成立的部分：{reasons}"
             blocks.append(AnswerBlock(kind=AnswerBlockKind.NOTE, text=note))
             parts.append(note)
