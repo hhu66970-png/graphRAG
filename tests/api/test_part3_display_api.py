@@ -210,6 +210,7 @@ def test_verification_unavailable_has_no_verification_note(
     wire(rows=rows_with_other_population())
 
     def _boom(*args, **kwargs):
+        """测试用：故意抛出异常。"""
         raise RuntimeError("核验层不可用（替身）")
 
     monkeypatch.setattr(api_module, "_high_risk_answer", _boom)
@@ -265,6 +266,7 @@ def test_benign_response_gains_no_high_risk_fields(client, wire):
 
 # ------------------------------------------------------------ 前端纯函数执行
 def _node_binary() -> str:
+    """找到用于前端片段测试的 Node 可执行文件。"""
     found = shutil.which("node")
     if found:
         return found

@@ -1,146 +1,156 @@
 # 《中药学》Evidence GraphRAG 知识图谱问答系统
 
-本项目以老师的 [tjudb/2026graphrag](https://gitee.com/tjudb/2026graphrag) 为基线，保留其“文本分块 → LLM 抽取实体关系 → Neo4j 图谱与向量索引 → Flask API → 图谱可视化问答”的主流程，语料与抽取模式改为《中药学（新世纪第五版）》，并在建图环节重构为**证据优先的双层图谱**：
+面向《中药学（新世纪第五版）》的证据优先 GraphRAG。基线是老师的
+[tjudb/2026graphrag](https://gitee.com/tjudb/2026graphrag)，主流程仍是
+「文本分块 → LLM 抽实体关系 → Neo4j → Flask 问答可视化」，语料改为中药学教材，
+建图改为**双层证据图谱**。
 
-> 每条正式事实都必须能回到教材原句与页码；实体身份用稳定 `canonical_id` 而非名称；
-> 构建走 `BUILDING → ACTIVE` 原子发布，失败不影响正在服务的版本。
+```text
+PDF/OCR → 结构化 Chunk → 受控本体抽取 → Assertion 证据层
+       → Neo4j Serving 投影 → 意图路由检索 → LLM 回答与前端可视化
+```
 
-> 原教材是 502 页扫描 PDF，没有文字层，仓库因此包含可断点续跑的本地中文 OCR 流程。
-> 原始 PDF、OCR 全文、密钥和数据库数据均不会被 Git 跟踪。
+每条正式事实必须能回到教材原句与页码；实体身份用 `canonical_id` 而不是药名；
+构建走 `BUILDING → ACTIVE` 原子发布，失败不影响正在服务的版本。
 
-**文档入口**
-
-- [`docs/`](docs/) —— 技术文档：[团队开发规范](docs/团队开发规范.md)（动代码前必读）、
-  [总体系统设计](docs/总体系统设计与可行性评审.md)、
-  [KG 构建环节改进技术文档](docs/KG构建环节改进技术文档.md)
-- [`待办与注意事项/`](待办与注意事项/) —— [注意事项](待办与注意事项/注意事项.md)（会踩的坑）、
-  [待办清单](待办与注意事项/待办清单.md)（按 Owner 划分）、
-  [已知局限](待办与注意事项/已知局限.md)（系统边界）
-- 检索评测 —— [120 题一览](检索评测集120题一览.md)、
-  [人工仲裁结果](检索评测集120题人工仲裁结果.md)（答案、页码与 Chunk 证据）
+教材是 502 页扫描 PDF（无文字层），仓库带可断点续跑的本地中文 OCR。
+原始 PDF、OCR 全文、密钥和数据库数据默认不进 Git。
 
 ---
 
-## 建图环节改进概览
+## 目录
 
-老师基线的建图方式是「开放本体 + 按名称建实体 + 自由文本关系 + 全库删除重建」。
-在全书 870 个文本块上实测，这套方式产生了如下问题（`scripts/kg_v2_demo.py --audit`
-可随时复现）：
+1. [设计原则](#设计原则)
+2. [建图改进与实测](#建图改进与实测)
+3. [项目结构](#1-项目结构)
+4. [安装](#2-安装)
+5. [PDF 转语料](#3-pdf-转语料)
+6. [构建图谱](#4-构建证据知识图谱)
+7. [启动问答](#5-启动问答界面)
+8. [测试](#6-测试)
+9. [抽取评测](#7-抽取质量评测)
+10. [检索评测](#8-检索评测集)
+11. [离线数据包](#9-把已建好的图谱分享给别人无需云服务器)
+12. [旧管线对照](#10-旧管线对照基线)
+13. [已知局限与注意事项](#已知局限与注意事项)
+
+文档、Schema 与代码不一致时的优先级：
+
+```text
+ontology.yaml 与稳定数据契约  >  API/测试契约  >  当前实现  >  过时文字说明
+```
+
+---
+
+## 设计原则
+
+- **证据优先**：`ACCEPTED` 断言必须有 Chunk、页码和可定位的逐字 `evidence_quote`；
+  定位不到只能 `REVIEW`/`REJECTED`。禁止把模型常识写入正式事实图。
+- **双层图**：Assertion 是事实源（证据、版本、极性、冲突）；Serving 边是可重建投影。
+  只投影 `ACTIVE + ACCEPTED + POSITIVE`。否定事实（如「不宜与藜芦同用」）不画成正向边。
+- **稳定身份**：`canonical_id = 类型 + hash(规范名)`。禁止用 `name` 做唯一身份，
+  也不对实体名建全局唯一约束。
+- **受控本体**：类型与谓词只来自 `graphragexpr/domain/ontology.yaml`（14 类实体、
+  13 个稳定谓词，带 domain/range 与高风险标记）。未知类型**记录并拒绝**，
+  不得静默降成「概念」。
+- **按意图检索**：规则路由，不调 LLM。路径最多 3 跳且只走领域白名单边。
+- **分数语义分离**：`rule_score`（规则）、`llm_verdict`（未复核为 `NOT_RUN`）、
+  `final_score`（排序用，**不是**事实正确概率）。
+- **关系校验 I2**：明确非法直接拒、不调 LLM；高分非高风险直接接受；灰区与全部
+  高风险谓词（剂量、禁忌、配伍禁忌）才二次校验。
+- **消歧 I1**：按类型分桶，禁止跨类型合并；除权威别名精确匹配外，包含式/向量
+  只出候选（避免麻黄并进麻黄根）。
+- **跨块 I3**：同药物条目内把「本品…」补回锚点药，新候选必须再过 I2。
+- **技术边界**：Neo4j **5.26 LTS**；问答主链用原生 `neo4j` Driver，不依赖
+  `neo4j-graphrag`；`hash` 嵌入只许测试，不能当演示结论。
+
+关系校验流程：
+
+```text
+先算 rule_score
+  ├─ 非法（domain/range、自环、OCR 噪声）→ REJECTED，不调 LLM
+  ├─ 规则够高且非高风险 → ACCEPTED，llm_verdict = NOT_RUN
+  └─ 灰区 + 全部高风险谓词 → LLM verifier → final_score
+```
+
+检索意图：
+
+| 意图 | 做什么 |
+|---|---|
+| `attr` | 单味药属性卡片 |
+| `reverse` | 按功效/主治反向查药 |
+| `intersect` | 多约束硬交集（部分匹配单独标记） |
+| `compare` | 多药事实槽对齐 + 章节摘要 |
+| `path` | 白名单关系最多 3 跳 |
+| `fallback` | 总论等走文本块检索 |
+
+Flask 托管 `frontend/index.html` 与 `/api/*`。问答默认 `auto` 路由；
+`keyword_graph` / `vector` / `hybrid` 等保留作课程对照。前端不直连 Neo4j。
+`/api/search` 仍在，但当前页面不再调用。
+
+---
+
+## 建图改进与实测
+
+老师基线是「开放本体 + 按名称建实体 + 自由文本关系 + 全库删除重建」。
+在 870 个文本块上的问题（`python scripts/kg_v2_demo.py --audit` 可复现）：
 
 | 问题 | 实测 | 根因 |
 |---|---:|---|
-| 同名跨类型实体 | 506 个名字 | 「呕吐」同时是概念/功效/禁忌/主治，各建一个节点 |
-| 笛卡尔积冗余边 | 8,623 / 38,085（22.6%） | 写关系时 `MATCH (n {name})` 无类型，一条事实被复制成多条边 |
-| 关系类型失控 | 182 种（82 种只出现 ≤2 次） | 关系类型是自由文本，「主编」「习称」都成了正式关系 |
-| 关系无来源 | 0 条带页码 | 图谱推出的结论标不出教材出处 |
-| 未知类型被吞 | 982 个「概念」节点 | 不在白名单的类型一律降级为「概念」，无处查证 |
-
-### 改了什么
-
-**身份**：实体身份改用稳定 `canonical_id = 类型 + hash(规范名)`，类型编进身份，
-因此「呕吐(主治)」与「呕吐(功效)」天然是两个实体，笛卡尔积在结构上无法发生。
-
-**本体**：`domain/ontology.yaml` 定义 14 类实体与 13 个稳定谓词，每个谓词带
-domain/range 与高风险标记。未知类型**记录并拒绝**，不再静默降级。
-
-**证据**：每条正式事实都要有逐字原句、原文字符跨度与页码。证据定位走四级匹配
-（原文精确 → 规范化精确 → 极小编辑距离），能容忍 OCR 的空格、换行与全半角差异；
-**定位不到的只能进 REVIEW，不得入正式事实图**。
-
-**双层图**：`Assertion` 证据层是事实源，类型化直接边是可重建的服务投影。
-审计、版本、多来源冲突由断言层承担，检索侧仍然查得快。
-
-**分数语义**：`rule_score`（确定性规则分）、`llm_verdict`（未复核时为 `NOT_RUN`）、
-`final_score`（决策支持值）三者分离，不再混用一个 `support_score`。
-
-**发布**：新构建先 `BUILDING`，质量门槛（证据覆盖率、块级失败率）通过后**原子切换**
-为 `ACTIVE`，失败则标记 `FAILED` 且旧版本继续服务。不再 `DETACH DELETE` 全库。
-
-**质量三件套**：I1 分层实体消歧（严禁跨类型与包含式自动合并，
-麻黄/麻黄根、黄连/胡黄连不会被并成一个）、I2 关系规则验证 + 灰区二次校验、
-I3 跨块补全（把「本品味辛性凉…」这类省略主语的句子归回条目锚点药）。
-
-### 效果
+| 同名跨类型实体 | 506 个名字 | 「呕吐」同时是概念/功效/禁忌/主治 |
+| 笛卡尔积冗余边 | 8,623 / 38,085（22.6%） | `MATCH (n {name})` 无类型 |
+| 关系类型失控 | 182 种 | 关系是自由文本 |
+| 关系无来源 | 0 条带页码 | 写入不带 provenance |
+| 未知类型被吞 | 982 个「概念」 | 不在白名单就降级 |
 
 | 指标 | 旧图 | 新图 |
 |---|---:|---:|
-| 同名跨类型导致的错连 | 506 | **0** |
+| 同名跨类型错连 | 506 | **0** |
 | 冗余重复边 | 8,623（22.6%） | **0** |
-| 关系类型数 | 182 | **12**（本体白名单内） |
-| 带页码 provenance 的边 | 0 / 38,085 | **16,681 / 16,681** |
+| 关系类型数 | 182 | **12**（白名单内） |
+| 带页码的边 | 0 / 38,085 | **16,681 / 16,681** |
 | 「概念」兜底节点 | 982 | 88 |
-| ACCEPTED 断言证据覆盖率 | 无断言层 | **100%** |
+| ACCEPTED 证据覆盖率 | 无断言层 | **100%** |
 
-最直观的例子是「人参的性味、归经和功效」——旧检索链路答不出来（返回的是黄芪的
-三元组），新图里这些属性跨第 50/68/378/379/380 页聚合在一起，每条带页码：
+例：「人参的性味、归经和功效」旧链路会串到黄芪；新图跨页聚合且每条带页码。
 
-```
-性味为   甘、微苦，微温                              第378页
-归经为   归脾、肺、心、肾经                          第378页
-具有功效 大补元气、复脉固脱、补脾益肺、生津养血、安神益智  第378页
-证据     第378页「本品甘温补虚，能大补元气，复脉固脱，为拯危救脱之要药。」
-```
-
-完整的问题诊断、逐条改动与实测数据见
-[KG 构建环节改进技术文档](docs/KG构建环节改进技术文档.md)。
+与老师仓库的对应：红楼梦开放抽 → 中药学受控本体；`name` 身份 → `canonical_id`；
+自由关系 → 13 谓词；无来源 → 逐字证据；`DETACH DELETE` → `IngestRun` 发布。
 
 ---
 
 ## 1. 项目结构
 
 ```text
-backend/api.py                          Flask API（自动路由 + 对照模式编排）
-frontend/index.html                     中药学知识图谱前端
+backend/api.py                          Flask：问答、子图、健康检查
+frontend/index.html                     问答前端（D3 子图，不直连数据库）
 
 graphragexpr/
-├── config/settings.py                  全部阈值、预算、版本与消融开关
-├── domain/
-│   ├── ontology.yaml                   受控本体：14 类实体 + 13 个稳定谓词
-│   ├── ontology.py                     本体加载与 domain/range 校验
-│   ├── models.py                       建图契约 + EvidencePacket
-│   └── ids.py                          稳定 ID（canonical_id / chunk_id / fact_key）
-├── ingest/structure.py                 从教材版式识别药物条目边界（entry_id）
-├── extract/
-│   ├── evidence.py                     四级证据定位，返回原文字符跨度
-│   ├── dosage.py                       剂量值对象解析（数值/单位/给药方式/条件）
-│   ├── relation_validator.py           I2 规则验证 + 灰区二次校验
-│   ├── cross_chunk.py                  I3 跨块补全的分组策略
-│   ├── extractor.py                    抽取管线整合
-│   ├── llm_client.py                   统一 LLM 客户端（重试/JSON 校验/失败清单）
-│   ├── corpus.py                       页码感知的 Markdown 分块（新旧共用）
-│   ├── build_kg_dyn.py                 ← 旧版建图，保留作对照基线（见 §10）
-│   └── rag_graph.py / rag_vector.py    ← 旧版检索脚本，同上
-├── linking/entity_resolver.py          I1 分层实体消歧
-├── storage/
-│   ├── assertions.py                   Assertion 事实源写入
-│   ├── serving_projection.py           类型化 Serving 边投影
-│   ├── serving_read.py                 属性卡片 / 反向检索 / 证据回溯
-│   ├── runs.py                         IngestRun 原子发布与回滚
-│   └── indexes.py                      约束与索引
-├── retrieval/                          意图路由 / 交集 / 对比摘要 / 受限路径
-└── evaluation/                         抽取与检索评测
+├── config/settings.py                  阈值、预算、消融开关
+├── domain/ontology.yaml                受控本体（唯一类型/谓词事实源）
+├── ingest/structure.py                 药物条目边界（entry_id）
+├── extract/                            抽取、证据、剂量、I2/I3；旧 build_kg_dyn 作对照
+├── linking/entity_resolver.py          I1 消歧
+├── storage/                            Neo4j、Assertion、投影、原子发布
+├── retrieval/                          意图路由与证据包
+├── highrisk/                           剂量/禁忌程序核验
+└── evaluation/                         抽取/检索/高风险评测逻辑
 
-scripts/
-├── preprocess_pdf.py                   扫描 PDF OCR → Markdown
-├── build_kg_v2.py                      构建证据图谱（主入口）
-├── verify_kg_v2.py                     新旧对照 + 属性卡片演示
-├── eval_extraction.py                  抽取质量评测
-├── eval_retrieval.py                   检索集校验与预测评分
-├── calibrate_thresholds.py             阈值标定曲线
-└── export_kg_bundle.py / import_kg_bundle.py   离线数据包导出/导入
-
-origdata/                               本地语料目录（默认不提交）
-eval/retrieval/questions.jsonl          120 题分型检索评测集
-检索评测集120题一览.md                  面向人的题目清单
-检索评测集120题人工仲裁结果.md          人工答案与教材证据
-tests/kg/ + tests/retrieval/             建图与检索测试
+scripts/                                OCR、建图、评测、导入导出
+eval/retrieval/questions.jsonl          120 题检索金标
+eval/high_risk/questions.jsonl          高风险评测题
+tests/                                  单元与契约测试
+origdata/                               本机 OCR 语料（不提交）
 ```
+
+Windows 下 `.\xxx.ps1` 是对应 Python 脚本的包装；macOS/Linux 直接跑
+`python scripts/xxx.py`。
 
 ---
 
 ## 2. 安装
 
-推荐 Python 3.12（代码使用 `zip(strict=True)` 等 3.10+ 语法，3.9 无法运行）。
+推荐 Python 3.12（用到 `zip(strict=True)` 等 3.10+ 语法）。
 
 ```powershell
 python -m venv .venv
@@ -149,7 +159,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-如果使用 Anaconda：
+Anaconda：
 
 ```powershell
 conda create -n zhongyao_graphrag python=3.12 -y
@@ -159,19 +169,8 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-macOS / Linux 用 `python3 -m venv .venv && source .venv/bin/activate`，
-其余命令把 `.\xxx.ps1` 换成对应的 `python scripts/xxx.py` 即可。
-
-编辑 `.env`，至少填写 Neo4j 与 LLM 配置。默认使用本地中文模型
-`BAAI/bge-small-zh-v1.5` 生成 512 维向量，首次运行会下载模型。
-如需改用兼容 OpenAI Embeddings API 的服务，设 `EMBED_PROVIDER=external`
-并填写 `EMBED_ENDPOINT`、`EMBED_MODEL`、`EMBED_TOKEN`。
-
-> `EMBED_CACHE_DIR` 请填**绝对路径**。代码不做 `~` 展开，写 `~/...` 会在仓库里
-> 创建一个名为 `~` 的字面量目录。
-
-Neo4j 固定为 **5.26 LTS**（2026 系列已将 `db.index.vector.queryNodes` 标记为
-deprecated）。没有本机 Neo4j 时：
+编辑 `.env`，至少填 Neo4j 与 LLM。默认本地 `BAAI/bge-small-zh-v1.5`（512 维），
+首次会下载模型。`EMBED_CACHE_DIR` 必须是**绝对路径**（代码不展开 `~`）。
 
 ```powershell
 docker compose up -d neo4j
@@ -181,22 +180,12 @@ docker compose up -d neo4j
 
 ## 3. PDF 转语料
 
-先做小范围试跑：
-
 ```powershell
-python scripts\preprocess_pdf.py `
-  --pdf "D:\你的路径\中药学.pdf" `
-  --output origdata\zhongyaoxue.md `
-  --start-page 28 --end-page 50
+python scripts\preprocess_pdf.py --pdf "D:\路径\中药学.pdf" --output origdata\zhongyaoxue.md
 ```
 
-确认效果后处理全书：
-
-```powershell
-python scripts\preprocess_pdf.py --pdf "D:\你的路径\中药学.pdf" --output origdata\zhongyaoxue.md
-```
-
-OCR 每页结果缓存在 `origdata/.ocr-pages/`，中断后执行同一命令会跳过已完成页面。
+可加 `--start-page` / `--end-page` 试跑。OCR 缓存在 `origdata/.ocr-pages/`，
+中断后重跑会跳过已完成页。
 
 ---
 
@@ -206,41 +195,22 @@ OCR 每页结果缓存在 `origdata/.ocr-pages/`，中断后执行同一命令�
 .\build_kg_v2.ps1
 ```
 
-等价于 `python scripts\build_kg_v2.py --workers 6 --activate`。管线依次执行：
+等价于 `python scripts\build_kg_v2.py --workers 6 --activate`：建索引 →
+`IngestRun(BUILDING)` → 条目识别 → 并发抽取（磁盘缓存可续跑）→ I1/证据/I2 →
+I3 跨块补全 → 写断言并投影 → 质量门通过后原子切 `ACTIVE`。
 
-1. 建立约束与索引（5 个唯一约束 + 向量/全文索引，全文用 `cjk` 分析器）；
-2. 新建 `IngestRun(status=BUILDING)`；
-3. 从教材版式识别药物条目边界，为每块赋 `entry_id`；
-4. 并发抽取，**结果按 `内容哈希 + prompt_version + schema_version` 磁盘缓存**，可断点续跑；
-5. I1 实体消歧 → 证据定位 → I2 规则验证（灰区与全部高风险谓词走二次校验）；
-6. I3 跨块补全：把「本品味辛性凉…」这类省略主语的句子归回条目锚点药；
-7. 写入 Entity 与 Assertion，重建类型化 Serving 投影；
-8. 质量门槛通过后**原子切换**为 `ACTIVE`，否则标记 `FAILED` 并保留旧版本继续服务。
-
-抽取缓存在 `.cache/kg_v2/`，重跑不会重复付费。改动 Prompt 或 Schema 必须升
-`settings.py` 里的版本号，缓存会随之失效。
-
-查看构建结果与新旧对照：
+抽取缓存 `.cache/kg_v2/`。改 Prompt 或 Schema 须升 `settings.py` 版本号。
 
 ```powershell
 python scripts\verify_kg_v2.py --herb 麻黄
 ```
 
-### 双层图数据模型
-
 ```text
-事实源层  (Assertion)-[:SUBJECT]->(Entity)
-                     -[:OBJECT]->(Entity)
-                     -[:EVIDENCED_BY]->(Chunk)
-                     -[:IN_RUN]->(IngestRun)
-
-投影层    (Entity)-[:HAS_EFFICACY {fact_key, evidence_ids,
-                                   page_start, page_end, active_run_id}]->(Entity)
+事实源  (Assertion)-[:SUBJECT]->(Entity)
+                   -[:OBJECT]->(Entity)
+                   -[:EVIDENCED_BY]->(Chunk)
+投影    (Entity)-[:HAS_EFFICACY {fact_key, page_start, evidence_ids, ...}]->(Entity)
 ```
-
-Serving 边只投影 `ACTIVE + ACCEPTED + POSITIVE` 的断言，可随时重建；
-审计、版本与多来源由 Assertion 层承担。否定事实（如「不宜与藜芦同用」）
-不会被投影成肯定边。
 
 ---
 
@@ -250,22 +220,16 @@ Serving 边只投影 `ACTIVE + ACCEPTED + POSITIVE` 的断言，可随时重建�
 .\start_backend.ps1
 ```
 
-浏览器打开 <http://localhost:5000>。前端默认自动判断问题类型：
+打开 <http://localhost:5000>。默认自动路由。可试：
 
-| 模式 | 说明 |
-|---|---|
-| **自动意图路由**（默认） | `attr/reverse/intersect/compare/path/fallback` → 定向检索 → 带页码作答 |
-| 证据知识图谱 v2 | 自动路由的兼容入口 |
-| 中文混合向量+图谱 | 中文 BM25 与 BGE 向量融合，块内展开图谱关系 |
-| 纯向量 / 向量+图遍历 / 混合 / 混合+图遍历 | 原生 Neo4j Driver 实现，保留作课程对比实验 |
+- 人参的性味、归经和功效是什么？
+- 哪些药同时具有清热解毒和凉血功效？
+- 比较人参和黄芪的功效异同。
+- 影响中药贮藏变异的外界因素有哪些？（总论，走 fallback）
+- 什么是中药？
 
-可尝试的问题：
-
-- “人参的性味、归经和功效是什么？”
-- “哪些药同时具有清热解毒和凉血功效？”
-- “比较人参和黄芪的功效异同。”
-- “影响中药贮藏变异的外界因素有哪些？”
-- “什么是中药？中药材、中药饮片和中成药有什么区别？”
+对照模式：中文混合向量+图谱、纯向量、向量+图遍历、混合+图遍历
+（原生 Driver，读库中的旧图实体；不必再跑已删除的独立可视化脚本）。
 
 ---
 
@@ -275,171 +239,108 @@ Serving 边只投影 `ACTIVE + ACCEPTED + POSITIVE` 的断言，可随时重建�
 .\run_tests.ps1
 ```
 
-默认只运行无需外部服务的单元测试；集成测试用 `python -m pytest -m integration`。
+默认无外部服务的单元测试。集成测试：`python -m pytest -m integration`。
 
-> **集成测试与生产共用数据库时的注意事项**：`clean_database` fixture 在目标库
-> 非空时会**跳过**而不是清空，需要在非空库上跑破坏性测试须显式设置
-> `ALLOW_DESTRUCTIVE_TESTS=true`。测试实体名一律带 `ITEST药` 前缀，避免与真实
-> 实体撞上同一个 `canonical_id`。更稳妥的做法是给测试单独起一个 Neo4j 实例。
+`clean_database` 在目标库非空时会**跳过**而不是清空；破坏性测试须设
+`ALLOW_DESTRUCTIVE_TESTS=true`。测试实体名带 `ITEST药` 前缀。最好用单独 Neo4j 实例。
 
 ---
 
 ## 7. 抽取质量评测
 
-教材条目自带结构化字段（`【药性】`、`【功效】`、`【用法用量】`），可**纯规则解析、
-不调用 LLM**，作为抽取质量的参照基准：
-
 ```powershell
 .\eval_kg.ps1
 ```
 
-等价于依次运行 `scripts\eval_extraction.py` 与 `scripts\calibrate_thresholds.py`。
+教材 `【药性】`/`【功效】` 等可规则解析作参照（375 味药）：
 
-在 375 味药的参照集上的实测结果：
+| 字段 | Recall@field | Prec@field↓ |
+|---|---:|---:|
+| 性味 | 90.1% | 88.0% |
+| 归经 | 78.6% | 90.9% |
+| 功效 | 86.1% | 50.0% |
+| **合计** | **85.2%** | **69.0%** |
 
-| 字段 | 金标取值 | 图谱取值 | Recall@field | Prec@field↓ |
-|---|---:|---:|---:|---:|
-| 性味 | 1,099 | 1,125 | 90.1% | 88.0% |
-| 归经 | 966 | 835 | 78.6% | 90.9% |
-| 功效 | 1,211 | 2,086 | 86.1% | 50.0% |
-| **合计** | **3,276** | **4,046** | **85.2%** | **69.0%** |
+口径：这是结构化字段参照，**不是**双人金标；**主治/配伍/禁忌无参照**；
+Precision 是**下界**（字段外的合理事实不算错）。可说「字段召回 85.2%」，
+**不能**说「准确率 85%」。`final_score` 也不是正确概率。
 
-**引用这些数字时必须连同口径说明**：
-
-- 这是「教材结构化字段参照集」，**不是**双人标注仲裁的金标准；
-- 只覆盖 性味/归经/功效，**主治、配伍、禁忌没有任何参照**；
-- Precision 标注 ↓ 表示**下界**——图谱合理包含字段之外的正确事实
-  （【应用】段落、跨章节引用），它们不在参照集里但并不算错；
-- 因此可以说「在教材结构化字段上字段召回率 85.2%」，
-  **不能**简化成「准确率 85%」。
-
-接受阈值 `final_accept_threshold = 0.80` 由标定曲线冻结：相比 0.60 只损失
-0.4pp 召回，换来 1.8pp 精确率；再往上到 0.85 召回骤降 7pp。
+`final_accept_threshold = 0.80` 由标定曲线冻结。
 
 ---
 
 ## 8. 检索评测集
 
-`eval/retrieval/questions.jsonl` 冻结了 120 题：attr 25、reverse 20、intersect 20、
-compare 20、path 20、safety 15。2026-09-05 的人工仲裁结果为 113 题正常作答、
-7 题必须拒答；118 题已填写教材页码和稳定 Chunk ID，另外两道拒答题因题设明确
-不存在来源证据而保留空数组。40 道反向/交集题均填写了 `gold_result_entities`，
-开放集合允许超过 5 个金标答案。
+`eval/retrieval/questions.jsonl`：120 题（attr 25 / reverse 20 / intersect 20 /
+compare 20 / path 20 / safety 15）。人工仲裁：113 题可答、7 题应拒答。
+说明见 [`eval/retrieval/README.md`](eval/retrieval/README.md)。
 
 ```powershell
 python scripts\eval_retrieval.py --validate-only
-python scripts\eval_retrieval.py --predictions path\to\predictions.jsonl
 ```
 
-当前脚本可计算路由、查询实体、谓词、拒答和页码指标；尚未实现基于排序 Chunk 的
-`Recall@5`。因此可以说“120 题及人工证据金标已完成”，但在补齐排序预测格式和
-`Chunk Recall@5` 评分前，不能声称已经达到设计文档中的 `Recall@5 ≥ 90%` 门槛。
-逐题答案和证据见[人工仲裁结果](检索评测集120题人工仲裁结果.md)。
+可评路由、实体、谓词、拒答、页码；**尚未**实现排序 Chunk 的 `Recall@5`，
+不得声称达到 90% 门槛。
+
+高风险题集见 [`eval/high_risk/README.md`](eval/high_risk/README.md)
+（部分仍待人工仲裁）。
 
 ---
 
 ## 9. 把已建好的图谱分享给别人（无需云服务器）
 
-向量写在 Neo4j 的 `Chunk.embedding` 上，与图谱、索引在同一库中，打包成离线 zip 分发。
-
-### 导出
-
 ```powershell
 python scripts\export_kg_bundle.py --active-only
 ```
 
-`--active-only` 排除已废弃 run 的 Assertion/Entity，只导出当前 `ACTIVE` 版本；
-不加则导出全库。输出 `dist/zhongyaoxue-kg-bundle.zip`。
+输出 `dist/zhongyaoxue-kg-bundle.zip`（已 gitignore，用 Release 或网盘分发）。
 
-### 导入
-
-对方只需：Python 环境、Neo4j、本仓库代码与该 zip。不必重新 OCR，也不必再调 LLM。
+对方：
 
 ```powershell
-Copy-Item .env.example .env   # 填写 Neo4j；问答还需要自己的 LLM_TOKEN
+Copy-Item .env.example .env
 docker compose up -d neo4j
 python scripts\import_kg_bundle.py --clear
 .\start_backend.ps1
 ```
 
-导入脚本会重建向量与全文索引。若要补齐 5 个唯一约束并把全文索引换成 `cjk`
-分析器（推荐），再执行一次：
+不必重新 OCR/抽全书。导入会重建向量与全文索引。建议再补约束和 `cjk` 分析器：
 
 ```powershell
 python -c "from dotenv import load_dotenv; load_dotenv(); from graphragexpr.storage.neo4j_store import Neo4jStore; from graphragexpr.storage.indexes import ensure_schema; s=Neo4jStore(); print(ensure_schema(s, embedding_dim=512, rebuild_fulltext=True)); s.close()"
 ```
 
-### 数据包内容（v2.0.0）
-
-| 内容 | 数量 | 是否包含 |
-|---|---:|---|
-| Chunk（含 512 维向量） | 870 | 是 |
-| Entity（规范实体） | 9,243 | 是 |
-| Assertion（证据断言） | 22,211 | 是 |
-| 类型化 Serving 边 | 16,681 | 是 |
-| 旧图实体（对照检索模式用） | 11,107 | 是 |
-| 向量 / 全文索引 | — | 导入脚本会重建 |
-| 查询用 BGE 模型 | — | 否，首次运行自动下载 |
-| `LLM_TOKEN` | — | **否，切勿分享密钥** |
-| OCR 全文 `zhongyaoxue.md` | — | 否（Chunk 文本已在包内） |
-
-分享方式：GitHub **Releases** 附件或网盘，**不要**把 zip 推进源码仓库
-（`dist/*.zip` 已在 `.gitignore`）。
+包内约有 Chunk 870（含向量）、Entity、Assertion、Serving 边及对照用旧图实体。
+**不含** `LLM_TOKEN` 和 BGE 模型。`Chunk.text` 是教材 OCR，公开分发前确认授权。
 
 ---
 
 ## 10. 旧管线（对照基线）
 
-`graphragexpr/extract/build_kg_dyn.py` 与 `build_kg_dyn.ps1` 是改造前的建图方式，
-**刻意保留**，用途有二：
+`graphragexpr/extract/build_kg_dyn.py` 与 `build_kg_dyn.ps1` **刻意保留**：
+课程需要新旧对照；前端向量/混合模式仍读旧图实体。新旧靠 `run_id`/`fact_key`
+共存。只跑新管线时不必执行旧建图——导入数据包即可。
 
-1. 课程报告需要新旧对照，旧图与新图靠 `run_id` / `fact_key` 在同一库中并存；
-2. 前端的纯向量、向量+图遍历、混合+图遍历三种模式仍读旧图实体。
-
-两者互不干扰：旧管线的关系不带 `fact_key`，新管线的投影清理只作用于带 `fact_key`
-的边。若只想跑新管线，不需要执行 `build_kg_dyn.ps1`——从数据包导入即可（§9）。
-
-> ⚠ 旧管线仍会 `DETACH DELETE` 全库（受 `.env` 的 `CLEAR_DATABASE` 控制），
-> 在已有 v2 数据的库上执行会连新图一起清掉。详见
-> [注意事项 §1](待办与注意事项/注意事项.md)。
-
-## 与老师仓库的对应关系
-
-| 老师仓库 | 本项目 |
-|---|---|
-| `origdata/orig.txt` 红楼梦文本 | `origdata/zhongyaoxue.md` OCR 教材文本 |
-| 人物、地点、物品、概念（开放本体） | `domain/ontology.yaml` 受控本体，未知类型记录并拒绝 |
-| 实体身份用 `name` | 稳定 `canonical_id`，同名不同类型天然是不同实体 |
-| 自由文本关系类型 | 13 个稳定谓词，带 domain/range 与高风险标记 |
-| 关系无来源 | 每条断言带 `chunk_ids`、页码与逐字 `evidence_quote` |
-| `DETACH DELETE` 全库重建 | `IngestRun` 原子发布与回滚 |
-| `sample_data_dyn.py` 按回目取样 | `corpus.py` 按页码与标题取样 |
-| Neo4j 向量/全文检索 | 保持一致，全文索引改用 `cjk` 分析器 |
-| Flask + D3 前端 | 保持一致，新增自动意图路由并保留对照模式 |
+> 旧管线仍可能 `DETACH DELETE` 全库（`.env` 的 `CLEAR_DATABASE`）。
+> 在已有 v2 数据的库上跑会把新图一起清掉。
 
 ---
 
-## 当前状态与下一步
+## 已知局限与注意事项
 
-| 环节 | Owner | 状态 |
-|---|---|---|
-| ingest / OCR / 结构解析 | A | 条目边界识别已实现（覆盖 86.7%），字段级解析待补 |
-| **建图与本体** | **B** | **已完成**，含量化评测与阈值标定 |
-| **检索** | **C** | **主链与金标已完成**：六类路由、交集、对比摘要、受限路径，以及 120 题人工仲裁数据集 |
-| 结构化注入与生成 | D | 仅设计，无引用校验 |
-| 评测与集成 | E | 抽取评测与检索金标已有；排序 Chunk 的 Recall@5 和生成评测待实现 |
+- **总论题**：图里是类型化中药事实，「什么是中药」「贮藏因素」等散文不在图中，
+  自动路由走文本 fallback。属性题上新图更好且带页码。
+- **抽取噪声**：对比句可能误归属（如人参槽混入他人性味）。REVIEW 不进 Serving。
+- **条目覆盖**：参照集里仍有少数药没有属性边；I3 只覆盖同条目。
+- **生成**：没有 Claim–Evidence 程序化校验，模型仍可能编页码；前端只展示后端给的溯源。
+- **链接阈值** `0.94/0.84` 未在完整金标上标定。
+- 评测数字必须带口径；hash 嵌入不能当正式检索质量。
+- 上传 Git 前确认 `.env`、zip、PDF、`.cache/`、`origdata/` 未被提交。
 
-实测对比（全新环境、按金标事实评分）：单药属性题上新图 3/3 且全部带页码，
-旧链路 0/3；但总论题上新图 1/2、旧纯向量 2/2——因为总论知识不构成实体关系，
-不在图里。自动路由会把这类问题送到文本块 fallback，详见
-[已知局限 §1](待办与注意事项/已知局限.md)。
-
-## 数据与合规
-
-请仅在课程实践和你有权使用的范围内处理教材。上传 GitHub 前请确认：
-
-- `.env` 已被 ignore，且其中没有真实 `LLM_TOKEN`；
-- `dist/*.zip`、PDF、`.cache/`、`.venv/`、`origdata/` 不会被提交；
-- **数据包内含教材 OCR 全文**。公开仓库的 Release 附件同样是公开可下载的，
-  发布前请确认分发范围符合授权；必要时把仓库转为私有，或分发去掉
-  `Chunk.text` 的精简版。
+| 环节 | 状态 |
+|---|---|
+| OCR / 条目识别 | 已实现（条目覆盖约 86.7%） |
+| 建图与本体 | 已完成 |
+| 检索主链与 120 题金标 | 已完成 |
+| 生成侧引用校验 | 未做 |
+| Chunk Recall@5 | 未做 |

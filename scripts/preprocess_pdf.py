@@ -23,11 +23,13 @@ SUBSECTION_RE = re.compile(r"^[一二三四五六七八九十]+、")
 
 
 def normalize_line(text: str) -> str:
+    """规范化 OCR 行（空白、全半角）。"""
     text = text.replace("\u3000", " ").strip()
     return re.sub(r"[ \t]+", " ", text)
 
 
 def markdown_line(text: str) -> str:
+    """把 OCR 行写成 Markdown。"""
     if CHAPTER_RE.match(text):
         return f"## {text}"
     if SECTION_RE.match(text):
@@ -59,6 +61,7 @@ def merge_split_headings(lines: list[str]) -> list[str]:
 
 
 def ocr_page(page: pymupdf.Page, engine: RapidOCR, dpi: int, min_score: float) -> list[str]:
+    """对单页 PDF 做 OCR。"""
     pix = page.get_pixmap(dpi=dpi, alpha=False)
     image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     result, _ = engine(image)
@@ -73,6 +76,7 @@ def ocr_page(page: pymupdf.Page, engine: RapidOCR, dpi: int, min_score: float) -
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """构造 preprocess_pdf 的命令行参数。"""
     parser = argparse.ArgumentParser(description="扫描版中文 PDF OCR 为 Markdown")
     parser.add_argument("--pdf", required=True, type=Path, help="源 PDF 路径")
     parser.add_argument("--output", required=True, type=Path, help="输出 Markdown 路径")
@@ -85,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     args = build_parser().parse_args()
     pdf_path = args.pdf.expanduser().resolve()
     output_path = args.output.expanduser().resolve()

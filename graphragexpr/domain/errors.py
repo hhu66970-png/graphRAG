@@ -18,6 +18,7 @@ class UnknownEntityTypeError(OntologyError):
     """
 
     def __init__(self, raw_type: str) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         super().__init__(f"未声明的实体类型: {raw_type!r}")
         self.raw_type = raw_type
 
@@ -26,6 +27,7 @@ class UnknownPredicateError(OntologyError):
     """Predicate is not declared in ontology.yaml."""
 
     def __init__(self, raw_predicate: str) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         super().__init__(f"未声明的关系类型: {raw_predicate!r}")
         self.raw_predicate = raw_predicate
 
@@ -34,6 +36,7 @@ class DomainRangeViolation(OntologyError):
     """Subject or object type is not allowed for this predicate."""
 
     def __init__(self, predicate: str, subject_type: str, object_type: str) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         super().__init__(
             f"关系 {predicate} 不允许 {subject_type} -> {object_type}"
         )

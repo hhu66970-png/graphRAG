@@ -26,6 +26,7 @@ HIGH_RISK_EXPAND_PREDICATES: tuple[str, ...] = (
 
 
 def read_active_run_id(session) -> str | None:
+    """读取当前 ACTIVE 的 IngestRun ID。"""
     record = session.run(
         "MATCH (r:IngestRun {status: 'ACTIVE'}) RETURN r.run_id AS run_id LIMIT 1"
     ).single()
@@ -61,6 +62,7 @@ def merge_extra_chunks(
 
 
 def _add_node(nodes: dict[str, dict], *, node_id, label, node_type, limit: int) -> bool:
+    """把实体加入问答子图节点表。"""
     if not node_id:
         return False
     if node_id in nodes:
@@ -87,6 +89,7 @@ def _add_edge(
     edge_limit: int,
     triple_limit: int,
 ) -> None:
+    """把关系加入问答子图边表与三元组。"""
     if not target_id or not rel_type:
         return
     if not _add_node(
@@ -106,6 +109,7 @@ def _add_edge(
 
 
 def _seed_entities(session, chunk_ids: list[str], *, limit: int) -> list[dict]:
+    """用检索命中块上的实体作为扩图种子。"""
     return list(
         session.run(
             """
@@ -127,6 +131,7 @@ def _seed_entities(session, chunk_ids: list[str], *, limit: int) -> list[dict]:
 
 
 def _expand_serving_edges(session, names: list[str], *, run_id: str, limit: int):
+    """沿 Serving 投影边扩展邻域。"""
     return list(
         session.run(
             """
@@ -158,6 +163,7 @@ def _expand_serving_edges(session, names: list[str], *, run_id: str, limit: int)
 
 
 def _chunks_for_assertions(session, assertion_ids: list[str], *, known_ids: list[str], limit: int):
+    """为断言补上对应教材块文本。"""
     if not assertion_ids:
         return []
     return [
@@ -221,6 +227,7 @@ def _expand_assertion_edges(session, names: list[str], *, run_id: str, limit: in
 
 
 def _expand_legacy_edges(session, chunk_ids: list[str], *, limit: int):
+    """旧图无 Serving 边时按名称扩邻域。"""
     return list(
         session.run(
             """
@@ -251,6 +258,7 @@ def _expand_legacy_edges(session, chunk_ids: list[str], *, limit: int):
 
 
 def _chunks_for_entities(session, entity_ids: list[str], *, known_ids: list[str], limit: int):
+    """按实体取出相关文本块。"""
     if not entity_ids:
         return []
     return [
@@ -292,15 +300,18 @@ def expand_cross_chunk_neighborhood(
     triple_limit: int,
     extra_chunk_limit: int,
     seed_limit: int = DEFAULT_SEED_LIMIT,
+    seed_names: list[str] | None = None,
 ) -> tuple[list[dict], list[dict], list[tuple[str, str, str]], list[dict]]:
     """Follow entities out of the hit chunks and collect their other evidence pages."""
-    if not chunk_ids:
+    if not chunk_ids and not seed_names:
         return [], [], [], []
 
-    seeds = _seed_entities(session, chunk_ids, limit=seed_limit)
-    names = list(
-        dict.fromkeys(row["entity_name"] for row in seeds if row.get("entity_name"))
-    )
+    seeds = _seed_entities(session, chunk_ids, limit=seed_limit) if chunk_ids else []
+    chunk_names = [row["entity_name"] for row in seeds if row.get("entity_name")]
+    asked_names = [name for name in (seed_names or []) if name]
+    # 问句已锚定药名时，只沿这些实体扩图，避免块上挂着的「功效/防风/头虱」
+    # 把子图画成别的药。
+    names = list(dict.fromkeys(asked_names or chunk_names))
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
     triples: list[tuple[str, str, str]] = []

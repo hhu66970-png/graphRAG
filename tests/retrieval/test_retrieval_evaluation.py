@@ -1,9 +1,12 @@
+"""测试检索评测器不会在无金标时编造指标。"""
+
 from __future__ import annotations
 
 from graphragexpr.evaluation.retrieval_eval import evaluate_predictions, load_dataset
 
 
 def test_dataset_validator_reports_120_frozen_questions():
+    """测试：数据集校验器报告120冻结的问题。"""
     dataset = load_dataset()
 
     assert dataset.summary["total"] == 120
@@ -12,6 +15,7 @@ def test_dataset_validator_reports_120_frozen_questions():
 
 
 def test_evaluator_does_not_invent_page_metric_without_gold_pages():
+    """测试：评分器不编造页码指标没有金标页。"""
     dataset = load_dataset()
     sample = next(row for row in dataset.rows if not row["gold_pages"])
     predictions = {

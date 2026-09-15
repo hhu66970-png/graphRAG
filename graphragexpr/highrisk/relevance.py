@@ -77,6 +77,7 @@ RELATIVE_LABEL: dict[Relevance, str] = {
 
 
 def ordered(relevance: Relevance) -> int:
+    """按相关度或严重程度排序证据。"""
     return _RELEVANCE_ORDER[relevance]
 
 
@@ -221,6 +222,7 @@ class DecisionResult:
 
 
 def _severity_of(unit: ConditionalEvidenceUnit) -> RestrictionSeverity:
+    """读取禁忌/慎用的严重程度。"""
     return unit.severity
 
 
@@ -407,6 +409,7 @@ _SEVERITY_RANK: dict[RestrictionSeverity, int] = {
 
 
 def _severity_order(severity: RestrictionSeverity) -> int:
+    """严重程度的排序键（禁用药优先）。"""
     return _SEVERITY_RANK[severity]
 
 

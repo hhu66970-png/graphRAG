@@ -1,3 +1,5 @@
+"""老师基线纯向量 RAG 脚本，仅作对照。"""
+
 # rag_vector.py
 import os
 import sys

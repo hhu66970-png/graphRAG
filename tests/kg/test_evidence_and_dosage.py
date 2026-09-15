@@ -22,7 +22,9 @@ CHUNK = (
 
 
 class TestNormalizeWithMap:
+    """测试类：覆盖「NormalizeWithMap」相关行为。"""
     def test_positions_map_back_to_raw(self):
+        """测试：位置映射回到原文。"""
         normalized, positions = normalize_with_map("归脾、肺 经")
         assert "　" not in normalized and " " not in normalized
         assert len(normalized) == len(positions)
@@ -32,27 +34,35 @@ class TestNormalizeWithMap:
             assert raw[positions[index]].lower() == char or raw[positions[index]] in "、"
 
     def test_empty_input(self):
+        """测试：空输入。"""
         assert normalize_with_map("") == ("", [])
 
 
 class TestBoundedEditDistance:
+    """测试类：覆盖「BoundedEditDistance」相关行为。"""
     def test_identical(self):
+        """测试：相同。"""
         assert bounded_edit_distance("归脾经", "归脾经", 2) == 0
 
     def test_within_bound(self):
+        """测试：在限度内约束。"""
         assert bounded_edit_distance("归脾肺经", "归脾经", 2) == 1
 
     def test_exceeds_bound_returns_sentinel(self):
+        """测试：超出约束返回哨兵值。"""
         assert bounded_edit_distance("完全不同的文本", "归脾经", 1) > 1
 
 
 class TestLocateEvidence:
+    """测试类：覆盖「LocateEvidence」相关行为。"""
     def test_raw_exact(self):
+        """测试：原文精确。"""
         span = locate_evidence("大补元气，复脉固脱", CHUNK)
         assert span.match_mode == "raw_exact"
         assert CHUNK[span.evidence_start : span.evidence_end] == "大补元气，复脉固脱"
 
     def test_raw_span_hint_verified(self):
+        """测试：原文跨度提示校验通过。"""
         quote = "归脾、肺、心、肾经"
         start = CHUNK.index(quote)
         span = locate_evidence(quote, CHUNK, hint_start=start, hint_end=start + len(quote))
@@ -75,16 +85,19 @@ class TestLocateEvidence:
         assert "　" in span.evidence_quote
 
     def test_normalized_exact_handles_fullwidth_punctuation(self):
+        """测试：规范化后精确处理全角标点。"""
         span = locate_evidence("煎服,3~9g", CHUNK)
         assert span.match_mode in {"normalized_exact", "fuzzy"}
         assert span.is_locatable
 
     def test_fuzzy_within_edit_distance(self):
+        """测试：模糊在限度内编辑距离。"""
         span = locate_evidence("大补元气，复脉固托", CHUNK, max_edit_distance=2)
         assert span.match_mode == "fuzzy"
         assert span.edit_distance <= 2
 
     def test_not_found_when_absent(self):
+        """测试：不找到当不存在。"""
         span = locate_evidence("此句教材中根本不存在无论如何", CHUNK)
         assert span.match_mode == "not_found"
         assert not span.is_locatable
@@ -94,22 +107,27 @@ class TestLocateEvidence:
         assert locate_evidence("甘", CHUNK).match_mode == "not_found"
 
     def test_empty_inputs(self):
+        """测试：空输入。"""
         assert locate_evidence("", CHUNK).match_mode == "not_found"
         assert locate_evidence("大补元气", "").match_mode == "not_found"
 
 
 class TestParseDosage:
+    """测试类：覆盖「ParseDosage」相关行为。"""
     def test_range_with_unit(self):
+        """测试：区间带单位。"""
         dosage = parse_dosage("煎服，3～9g")
         assert (dosage.value_min, dosage.value_max, dosage.unit) == (3.0, 9.0, "g")
         assert dosage.route == "煎服"
         assert is_well_formed(dosage)
 
     def test_ascii_hyphen_and_chinese_unit(self):
+        """测试：ASCII连字符且中文单位。"""
         dosage = parse_dosage("每日 1.5-3 克")
         assert (dosage.value_min, dosage.value_max, dosage.unit) == (1.5, 3.0, "g")
 
     def test_single_value(self):
+        """测试：单个值。"""
         dosage = parse_dosage("研末服，0.5g")
         assert dosage.value_min == dosage.value_max == 0.5
         assert dosage.route == "研末服"
@@ -120,10 +138,12 @@ class TestParseDosage:
         assert (dosage.value_min, dosage.value_max) == (3.0, 9.0)
 
     def test_condition_captured(self):
+        """测试：条件被捕捉。"""
         dosage = parse_dosage("煎服，9～30g；儿童减量")
         assert dosage.condition is not None and "减量" in dosage.condition
 
     def test_pregnancy_condition(self):
+        """测试：妊娠条件。"""
         dosage = parse_dosage("3～9g，孕妇慎用")
         assert dosage.condition is not None and "孕妇" in dosage.condition
 
@@ -135,9 +155,11 @@ class TestParseDosage:
         assert dosage.raw == "适量外用"
 
     def test_empty_input(self):
+        """测试：空输入。"""
         dosage = parse_dosage("")
         assert dosage.raw == "" and not is_well_formed(dosage)
 
     def test_raw_always_preserved(self):
+        """测试：原文始终得到保留。"""
         text = "先煎，15～30g，大剂量可用至60g"
         assert parse_dosage(text).raw == text

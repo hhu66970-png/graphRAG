@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _driver():
+    """按环境变量创建 Neo4j Driver。"""
     load_dotenv(ROOT / ".env")
     url = os.getenv("NEO4J_URL")
     user = os.getenv("NEO4J_USER")
@@ -62,6 +63,7 @@ RETURN elementId(a) AS source_id, elementId(b) AS target_id,
 
 
 def export_bundle(output: Path, *, active_only: bool = False) -> Path:
+    """把库中的图与向量导出为 zip。"""
     driver, database = _driver()
     output = output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +134,7 @@ def export_bundle(output: Path, *, active_only: bool = False) -> Path:
 
 
 def main() -> int:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     parser = argparse.ArgumentParser(description="Export Neo4j GraphRAG bundle")
     parser.add_argument(
         "--output",

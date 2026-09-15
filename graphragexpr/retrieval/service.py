@@ -23,6 +23,7 @@ FallbackRetriever = Callable[[str], tuple[list[dict], dict, list[tuple[str, str,
 
 
 def _query_id(question: str) -> str:
+    """为一次检索生成查询 ID。"""
     normalized = "".join(question.split())
     return f"query:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:20]}"
 
@@ -33,6 +34,7 @@ def _evidence_items(
     retrieval_scores: dict[str, float] | None = None,
     path_by_evidence: dict[str, list[dict]] | None = None,
 ) -> list[EvidenceItem]:
+    """把存储行转成 EvidencePacket 条目。"""
     scores = retrieval_scores or {}
     paths = path_by_evidence or {}
     items: list[EvidenceItem] = []
@@ -75,6 +77,7 @@ def _evidence_items(
 
 
 def _load_evidence_for_ids(store: Neo4jStore, evidence_ids: list[str]) -> list[dict]:
+    """按证据 ID 批量加载原文。"""
     return serving_read.load_evidence(store, list(dict.fromkeys(evidence_ids)))
 
 
@@ -115,6 +118,7 @@ def _apply_token_budget(
 
 
 def _path_score(path: dict) -> float:
+    """给一条受限路径打检索分。"""
     edge_scores = [float(score or 0.0) for score in path.get("edge_scores") or []]
     groups = path.get("evidence_id_groups") or []
     edge_count = max(len(path.get("predicates") or []), 1)
@@ -134,10 +138,12 @@ def _path_score(path: dict) -> float:
 
 
 def _is_incompat_plan(plan: RetrievalPlan) -> bool:
+    """判断当前计划是否在查配伍禁忌。"""
     return plan.allowed_predicates == ("INCOMPATIBLE_WITH",)
 
 
 def _high_risk_predicates(plan: RetrievalPlan) -> tuple[str, ...]:
+    """取出检索侧关心的高风险谓词集合。"""
     return tuple(
         predicate
         for predicate in plan.allowed_predicates
@@ -146,6 +152,7 @@ def _high_risk_predicates(plan: RetrievalPlan) -> tuple[str, ...]:
 
 
 def _map_assertion_rows(rows: list[dict]) -> list[dict]:
+    """把断言查询行映射成内部事实结构。"""
     mapped: list[dict] = []
     for row in rows:
         mapped.append(
@@ -168,6 +175,7 @@ def _load_assertion_facts(
     subject_ids: list[str],
     predicates: tuple[str, ...],
 ) -> list[dict]:
+    """按实体与谓词加载断言层事实。"""
     if not subject_ids or not predicates:
         return []
     return _map_assertion_rows(
@@ -275,6 +283,7 @@ def _retrieve_attr(
     plan: RetrievalPlan,
     run_id: str,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    """单味药属性卡片检索。"""
     planned_id = plan.linked_entity_ids[0] if plan.linked_entity_ids else None
     herb = next(
         (
@@ -336,6 +345,7 @@ def _retrieve_reverse(
     run_id: str,
     settings: RetrievalSettings,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    """按功效/主治反向查药。"""
     target = next(
         (
             item
@@ -371,6 +381,7 @@ def _retrieve_intersection(
     run_id: str,
     settings: RetrievalSettings,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    """多约束硬交集检索。"""
     names_by_id = {
         str(item.get("canonical_id")): item.get("name") or item.get("preferred_name")
         for item in linked
@@ -429,6 +440,7 @@ def _retrieve_compare(
     question: str,
     settings: RetrievalSettings,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    """多药对比检索与章节摘要。"""
     entity_ids = list(plan.linked_entity_ids[:4])
     if len(entity_ids) < 2:
         return [], {"nodes": [], "edges": []}, {}, ["比较问题需要至少两个已链接实体"]
@@ -488,6 +500,7 @@ def _retrieve_path(
     run_id: str,
     settings: RetrievalSettings,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    """白名单关系上的受限多跳路径。"""
     if len(plan.linked_entity_ids) < 2:
         return [], {"nodes": [], "edges": []}, {}, ["路径问题需要至少两个已链接实体"]
     paths = serving_read.find_supported_paths(
@@ -536,6 +549,7 @@ def _retrieve_fallback(
     question: str,
     fallback_retriever: FallbackRetriever | None,
 ) -> tuple[list[EvidenceItem], dict, dict, list[str]]:
+    """总论/兜底：走文本块检索。"""
     if fallback_retriever is None:
         return [], {"nodes": [], "edges": []}, {}, ["未配置文本块兜底检索器"]
     chunks, subgraph, _triples = fallback_retriever(question)
@@ -640,6 +654,7 @@ def retrieve(
 
 
 def _rows_to_subgraph(rows: list[dict], *, target: dict) -> dict:
+    """把查询行转成前端子图。"""
     nodes = {
         target["canonical_id"]: {
             "id": target["canonical_id"],
@@ -665,6 +680,7 @@ def _rows_to_subgraph(rows: list[dict], *, target: dict) -> dict:
 
 
 def _constraint_rows_to_subgraph(rows: list[dict], constraint_ids: list[str]) -> dict:
+    """把交集约束行转成子图。"""
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
     for row in rows:
@@ -695,6 +711,7 @@ def _constraint_rows_to_subgraph(rows: list[dict], constraint_ids: list[str]) ->
 
 
 def _merge_subgraphs(left: dict, right: dict) -> dict:
+    """合并多路子图节点与边。"""
     nodes = {node["id"]: node for node in (left.get("nodes") or []) if node.get("id")}
     edges = list(left.get("edges") or [])
     for node in right.get("nodes") or []:
@@ -754,6 +771,7 @@ def _assertion_paths_between(
 
 
 def _fact_rows_to_subgraph(rows: list[dict], linked: list[dict]) -> dict:
+    """把断言事实行转成子图。"""
     nodes = {
         item["canonical_id"]: {
             "id": item["canonical_id"],
@@ -784,6 +802,7 @@ def _fact_rows_to_subgraph(rows: list[dict], linked: list[dict]) -> dict:
 
 
 def _path_steps(path: dict) -> list[dict]:
+    """把路径拆成逐步关系。"""
     nodes = path.get("nodes") or []
     nodes_by_id = {node["id"]: node for node in nodes}
     predicates = path.get("predicates") or []
@@ -808,6 +827,7 @@ def _path_steps(path: dict) -> list[dict]:
 
 
 def _paths_to_subgraph(paths: list[dict]) -> dict:
+    """把多条路径画成子图。"""
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
     for path in paths:

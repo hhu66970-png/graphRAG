@@ -1,5 +1,5 @@
 ﻿# build_kg_dyn.ps1
-# Build the Chinese materia medica knowledge graph.
+# 老师基线旧建图：按名称写节点边，仅作对照，正式构建请用 build_kg_v2.ps1。
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Building Knowledge Graph - 中药学" -ForegroundColor Cyan

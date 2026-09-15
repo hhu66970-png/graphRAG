@@ -137,6 +137,7 @@ def classify_severity(text: str) -> tuple[RestrictionSeverity, str | None]:
 
 
 def _canonical_unit(raw_unit: str | None) -> str | None:
+    """把剂量单位规范成统一写法（如 g）。"""
     if not raw_unit:
         return None
     return _UNIT_CANONICAL.get(raw_unit.strip().lower(), raw_unit.strip().lower())
@@ -183,6 +184,7 @@ def _nearest_cue(
 def _field_span(
     window: str, window_offset: int, cue: str, start: int, end: int
 ) -> FieldSpan:
+    """在原文中定位某个字段的字符跨度。"""
     return FieldSpan(
         start=window_offset + start,
         end=window_offset + end,
@@ -215,6 +217,7 @@ def _is_page_reference(text: str, start: int, end: int) -> bool:
 
 
 def _find_occurrences(text: str) -> list[_Occurrence]:
+    """查找关键词在文本中的出现位置。"""
     occurrences: list[_Occurrence] = []
     for match in _DOSAGE_OCCURRENCE_RE.finditer(text):
         raw_unit = match.group("unit")

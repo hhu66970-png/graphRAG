@@ -32,6 +32,7 @@ def normalize_text(value: str) -> str:
 
 
 def _sha(*parts: object, length: int) -> str:
+    """对规范化文本做短哈希，用于稳定 ID。"""
     joined = "␟".join("" if p is None else str(p) for p in parts)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:length]
 
@@ -42,6 +43,7 @@ def document_id(file_bytes_hash: str, edition: str) -> str:
 
 
 def section_id(doc_id: str, section_path: list[str]) -> str:
+    """由章节路径生成稳定章节 ID。"""
     return _sha(doc_id, "/".join(section_path), length=20)
 
 
@@ -54,6 +56,7 @@ def chunk_id(doc_id: str, section_path: list[str], normalized_content: str) -> s
 
 
 def mention_id(chunk: str, start: int, end: int, surface: str) -> str:
+    """为一次实体提及生成稳定 ID。"""
     return _sha(chunk, start, end, surface, length=24)
 
 
@@ -81,6 +84,7 @@ def fact_key(
 
 
 def assertion_id(fact: str, chunk: str, span: tuple[int | None, int | None], schema_version: str) -> str:
+    """为一条断言生成稳定 ID。"""
     return _sha(fact, chunk, span[0], span[1], schema_version, length=24)
 
 

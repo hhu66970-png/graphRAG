@@ -1,6 +1,5 @@
 ﻿# build_kg_v2.ps1
-# Build the evidence knowledge graph (v2 pipeline).
-# 旧管线见 build_kg_dyn.ps1，保留作对照基线。
+# 启动新管线建图（抽取 + 断言 + 投影 + 发布）。旧管线对照见 build_kg_dyn.ps1。
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Building Evidence Knowledge Graph (v2)" -ForegroundColor Cyan

@@ -75,6 +75,7 @@ ORDER BY c.index LIMIT $limit
 
 
 def audit(store: Neo4jStore) -> None:
+    """审计旧图的同名跨类型、冗余边等问题。"""
     print("=" * 68)
     print("旧图（KG0）结构性缺陷审计")
     print("=" * 68)
@@ -92,6 +93,7 @@ def audit(store: Neo4jStore) -> None:
 
 
 def extract_demo(store: Neo4jStore, keyword: str, limit: int) -> None:
+    """用少量块演示新抽取管线。"""
     settings = KGSettings()
     ontology = load_ontology()
     resolver = EntityResolver(AliasStore(), settings)
@@ -150,6 +152,7 @@ def extract_demo(store: Neo4jStore, keyword: str, limit: int) -> None:
 
 
 def main() -> int:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Legacy KG audit + v2 extraction demo")
     parser.add_argument("--audit", action="store_true", help="审计旧图缺陷")

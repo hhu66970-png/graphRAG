@@ -18,6 +18,7 @@ from external_embedder import ExternalEmbedder  # noqa: E402
 
 
 def main() -> None:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     dimension = int(os.getenv("EMBED_DIM", "512"))
     embedder = ExternalEmbedder(dimension=dimension)
     driver = GraphDatabase.driver(

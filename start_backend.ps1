@@ -1,5 +1,8 @@
 ﻿# start_backend.ps1
-# Script to start the backend API server
+# 启动 Flask 后端：先探测 Neo4j Bolt，再运行 backend/api.py。
+param(
+    [switch]$Detached
+)
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "GraphRAG Backend API" -ForegroundColor Cyan
@@ -21,8 +24,28 @@ try {
 }
 
 Write-Host ""
-Write-Host "Starting backend server..." -ForegroundColor Yellow
 Write-Host "Application: http://localhost:5000" -ForegroundColor Green
+
+if ($Detached) {
+    $env:PYTHONIOENCODING = "utf-8"
+    $outLog = Join-Path $PSScriptRoot "backend.api.out.log"
+    $errLog = Join-Path $PSScriptRoot "backend.api.err.log"
+    Write-Host "Starting detached backend (survives closing Cursor)..." -ForegroundColor Yellow
+    $proc = Start-Process -FilePath $pythonExe -ArgumentList "backend\api.py" `
+        -WorkingDirectory $PSScriptRoot `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $outLog `
+        -RedirectStandardError $errLog `
+        -PassThru
+    if (-not $proc) {
+        Write-Host "Failed to launch backend." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Backend launched independently (PID $($proc.Id)). Close Cursor if you want; keep Neo4j running." -ForegroundColor Green
+    exit 0
+}
+
+Write-Host "Starting backend server in this window..." -ForegroundColor Yellow
 Write-Host "Press Ctrl+C to stop" -ForegroundColor Yellow
 Write-Host ""
 

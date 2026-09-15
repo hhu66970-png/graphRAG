@@ -21,6 +21,7 @@ LinkMethod = Literal["exact_alias", "longest_match", "character_candidate", "vec
 
 
 class _Base(BaseModel):
+    """_Base：本模块内部使用的数据结构。"""
     model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
 
 
@@ -43,6 +44,7 @@ class ChunkRecord(_Base):
     @field_validator("page_end")
     @classmethod
     def _pages_ordered(cls, v: int, info) -> int:
+        """保证页码起止有序。"""
         start = info.data.get("page_start")
         if start is not None and v < start:
             raise ValueError(f"page_end({v}) 不能小于 page_start({start})")
@@ -85,6 +87,7 @@ class EvidenceSpan(_Base):
 
     @property
     def is_locatable(self) -> bool:
+        """判断证据是否已定位到原文跨度。"""
         return self.match_mode != "not_found"
 
 
@@ -136,6 +139,7 @@ class AssertionRecord(_Base):
     @field_validator("object_value")
     @classmethod
     def _object_present(cls, v: dict | None, info) -> dict | None:
+        """检查断言宾语（实体或值对象）是否齐全。"""
         if v is None and not info.data.get("object_id"):
             raise ValueError("object_id 与 object_value 必须至少提供一个")
         return v
@@ -170,6 +174,7 @@ class EvidenceItem(_Base):
     @field_validator("page_end")
     @classmethod
     def _evidence_pages_ordered(cls, v: int, info) -> int:
+        """校验证据页码起止合法。"""
         start = info.data.get("page_start")
         if start is not None and v < start:
             raise ValueError(f"page_end({v}) 不能小于 page_start({start})")

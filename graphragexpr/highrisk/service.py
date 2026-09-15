@@ -207,6 +207,7 @@ def _asks_shared_incompatibility(question: str) -> bool:
 def _incompat_objects_by_subject(
     subject_names: list[str], units: dict[str, ConditionalEvidenceUnit]
 ) -> dict[str, set[str]]:
+    """按主语汇总配伍禁忌宾语。"""
     by_subject: dict[str, set[str]] = {name: set() for name in subject_names}
     for unit in units.values():
         if unit.predicate != "INCOMPATIBLE_WITH" or not unit.object_name:
@@ -221,6 +222,7 @@ def _incompatibility_coverage_notes(
     subject_names: list[str],
     units: dict[str, ConditionalEvidenceUnit],
 ) -> list[str]:
+    """配伍禁忌证据覆盖不全时生成说明。"""
     if not subject_names:
         return []
     if RiskCategory.INCOMPATIBILITY not in (categories_of(question) or ()):
@@ -296,6 +298,7 @@ def categories_of(question: str) -> tuple[RiskCategory, ...]:
 
 
 def _predicates_for(categories: tuple[RiskCategory, ...]) -> tuple[str, ...]:
+    """按问题类型选出要读取的高风险谓词。"""
     effective = categories or _ALL_CATEGORIES
     return tuple(
         predicate
@@ -324,6 +327,7 @@ def _split_sub_questions(question: str) -> list[str]:
 
 
 def _unit_cost(unit: ConditionalEvidenceUnit) -> int:
+    """估算一条证据单元占用的上下文预算。"""
     return len(unit.evidence_quote) + len(unit.context) + _UNIT_TOKEN_OVERHEAD
 
 
@@ -505,6 +509,7 @@ class HighRiskService:
         assertion_limit: int = DEFAULT_ASSERTION_LIMIT,
         unit_token_budget: int = DEFAULT_UNIT_TOKEN_BUDGET,
     ) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._store = store
         self._run_id = run_id
         self._llm = llm
@@ -515,6 +520,7 @@ class HighRiskService:
     def _read_rows(
         self, question: str, *, subject_ids: list[str], object_ids: list[str]
     ) -> list[dict]:
+        """从存储层读取高风险相关断言行。"""
         predicates = _predicates_for(categories_of(question))
         if subject_ids:
             return load_high_risk_assertions(
@@ -973,6 +979,7 @@ class HighRiskService:
         *,
         conflict_map: dict[str, str] | None = None,
     ) -> SubQuestionOutcome:
+        """组装一个子问题的核验结果。"""
         sub_ids = units_by_sub.get(sub_question, [])
         categories = categories_of(sub_question)
         category = categories[0] if categories else None
@@ -1070,6 +1077,7 @@ class HighRiskService:
 
 
 def _kind_of(unit: ConditionalEvidenceUnit) -> ClaimKind:
+    """判断结论种类（剂量/禁忌/配伍禁忌）。"""
     if unit.risk_category is RiskCategory.DOSAGE:
         return ClaimKind.DOSAGE
     if unit.risk_category is RiskCategory.CONTRAINDICATION:
@@ -1078,6 +1086,7 @@ def _kind_of(unit: ConditionalEvidenceUnit) -> ClaimKind:
 
 
 def _page_label(unit: ConditionalEvidenceUnit) -> str:
+    """生成页码标签。"""
     if not unit.page_available or unit.page_start is None:
         return "页码不可用"
     if unit.page_end in (None, unit.page_start):
@@ -1088,6 +1097,7 @@ def _page_label(unit: ConditionalEvidenceUnit) -> str:
 def _accepted_units(
     outcome: VerificationOutcome, injected: list[ConditionalEvidenceUnit]
 ) -> list[ConditionalEvidenceUnit]:
+    """筛出核验通过的证据单元。"""
     accepted_ids = {
         unit_id for verdict in outcome.accepted for unit_id in verdict.supporting_unit_ids
     }
@@ -1098,6 +1108,7 @@ def _merge_units(
     baseline: list[ConditionalEvidenceUnit],
     extra: list[ConditionalEvidenceUnit],
 ) -> list[ConditionalEvidenceUnit]:
+    """合并重复或可并列的证据单元。"""
     merged = {unit.unit_id: unit for unit in baseline}
     for unit in extra:
         merged.setdefault(unit.unit_id, unit)

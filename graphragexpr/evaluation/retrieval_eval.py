@@ -37,12 +37,14 @@ REQUIRED_FIELDS = {
 
 @dataclass(frozen=True)
 class RetrievalDataset:
+    """RetrievalDataset：本文件定义的数据结构或组件。"""
     rows: list[dict]
     summary: dict[str, Any]
     validation_errors: list[str]
 
 
 def _read_jsonl(path: Path) -> list[dict]:
+    """按行读取 JSONL 评测题或预测。"""
     rows: list[dict] = []
     with path.open(encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -95,6 +97,7 @@ def load_dataset(path: str | Path = DEFAULT_DATASET) -> RetrievalDataset:
 
 
 def _recall(gold: list[Any], predicted: list[Any]) -> float:
+    """计算集合召回。"""
     expected = set(gold)
     if not expected:
         return 1.0
@@ -102,6 +105,7 @@ def _recall(gold: list[Any], predicted: list[Any]) -> float:
 
 
 def _entity_names(values: list[Any]) -> list[str]:
+    """从预测或金标中取出实体名列表。"""
     names: list[str] = []
     for value in values:
         if isinstance(value, dict):
@@ -171,6 +175,7 @@ def evaluate_predictions(
 
 
 def load_predictions(path: str | Path) -> dict[str, dict]:
+    """加载检索预测 JSONL。"""
     rows = _read_jsonl(Path(path))
     ids = [str(row["id"]) for row in rows]
     duplicates = [item for item, count in Counter(ids).items() if count > 1]

@@ -35,6 +35,7 @@ SCHEMA_VERSION = "kg-ontology-1.0.0"
 
 @pytest.fixture(scope="module")
 def store():
+    """测试夹具：Neo4jStore。"""
     load_dotenv()
     if not all(os.getenv(n) for n in ("NEO4J_URL", "NEO4J_USER", "NEO4J_PASSWORD")):
         pytest.skip("Neo4j 未配置")
@@ -65,6 +66,7 @@ def _cleanup(store: Neo4jStore) -> None:
 
 @pytest.fixture
 def clean_test_scope(store):
+    """测试后清理本用例写入的节点。"""
     _cleanup(store)
     yield
     _cleanup(store)
@@ -141,6 +143,7 @@ def _seed(store: Neo4jStore, run_id: str) -> dict:
 
 
 def _make_assertion(run_id: str, chunk_ids: list[str], **kwargs) -> AssertionRecord:
+    """测试用：构造一条可发布断言。"""
     key = fact_key(kwargs["subject_id"], kwargs["predicate"],
                    kwargs.get("object_id") or "", {}, kwargs.get("polarity", "POSITIVE"))
     return AssertionRecord(
@@ -151,6 +154,7 @@ def _make_assertion(run_id: str, chunk_ids: list[str], **kwargs) -> AssertionRec
 
 
 class TestSchema:
+    """测试类：覆盖「Schema」相关行为。"""
     def test_required_constraints_exist(self, store):
         """SKILL §9.3 的五个唯一约束必须存在，且名称类不得有唯一约束。"""
         ensure_schema(store, embedding_dim=512, rebuild_fulltext=False)
@@ -169,6 +173,7 @@ class TestSchema:
             )
 
     def test_cjk_analyzer_availability_is_observable(self, store):
+        """测试：CJK分析器可用性为可观测。"""
         analyzers = available_analyzers(store)
         assert analyzers, "应能列出可用分析器"
         # 不断言 cjk 一定存在：设计 §2.2.4 要求实测而非假设
@@ -176,7 +181,9 @@ class TestSchema:
 
 
 class TestRunLifecycle:
+    """测试类：覆盖「RunLifecycle」相关行为。"""
     def test_building_run_is_not_active(self, store, clean_test_scope):
+        """测试：构建中run为不现行。"""
         run = run_store.start_run(store, settings_snapshot={"k": 1}, notes="itest")
         # start_run 生成的 run_id 不带 itest- 前缀，改用显式清理
         store.run("MATCH (r:IngestRun {run_id: $id}) SET r.run_id = $new",
@@ -197,6 +204,7 @@ class TestRunLifecycle:
         assert status == "FAILED"
 
     def test_activate_is_atomic_single_active(self, store, clean_test_scope, isolated_active_run):
+        """测试：激活为原子单个现行。"""
         old, new = "itest-run-a", "itest-run-b"
         store.run("CREATE (:IngestRun {run_id: $id, status: 'ACTIVE', created_at: '2026-01-01'})", id=old)
         store.run("CREATE (:IngestRun {run_id: $id, status: 'BUILDING', created_at: '2026-01-02'})", id=new)
@@ -210,6 +218,7 @@ class TestRunLifecycle:
         assert [r["id"] for r in actives] == [new], "同一时刻只能有一个 ACTIVE"
 
     def test_cannot_activate_non_building_run(self, store, clean_test_scope):
+        """测试：不能激活非构建中run。"""
         store.run("CREATE (:IngestRun {run_id: 'itest-run-c', status: 'FAILED', created_at: '2026-01-01'})")
         with pytest.raises(run_store.RunStateError):
             run_store.activate(store, "itest-run-c", quality_report={})
@@ -221,6 +230,7 @@ class TestRunLifecycle:
 
 
 class TestAssertionsAndProjection:
+    """测试类：覆盖「AssertionsAndProjection」相关行为。"""
     def test_cross_chunk_fact_and_projection(self, store, clean_test_scope):
         """SKILL §14.3-1/-5：两个 Chunk 共同构成一条事实，且能投影为类型化边。"""
         run_id = "itest-run-proj"
@@ -368,6 +378,7 @@ class TestAssertionsAndProjection:
         assert edges == 1, "重建投影不得产生重复边"
 
     def test_quality_report_gate(self, store, clean_test_scope):
+        """测试：质量报告门槛。"""
         run_id = "itest-run-quality"
         _seed(store, run_id)
         records = [

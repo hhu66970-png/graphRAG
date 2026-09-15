@@ -11,6 +11,7 @@ _SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？；])")
 
 
 def _best_source_sentence(question: str, entity_name: str, text: str) -> str:
+    """从章节文本中抽出最能支撑对比槽的原句。"""
     sentences = [
         part.strip() for part in _SENTENCE_BOUNDARY.split(text) if part.strip()
     ]
@@ -20,6 +21,7 @@ def _best_source_sentence(question: str, entity_name: str, text: str) -> str:
     terms = {chinese[index : index + 2] for index in range(max(0, len(chinese) - 1))}
 
     def score(sentence: str) -> tuple[int, int]:
+        """给对比摘要句打分。"""
         overlap = sum(term in sentence for term in terms)
         return (10 * int(entity_name in sentence) + overlap, -len(sentence))
 

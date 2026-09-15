@@ -126,6 +126,7 @@ class PolarityInterpretation:
 
 
 def _first_match(text: str, cues: tuple[str, ...]) -> tuple[str, ...]:
+    """返回模式的第一次匹配。"""
     return tuple(cue for cue in cues if cue in text)
 
 

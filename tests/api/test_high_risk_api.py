@@ -140,6 +140,7 @@ def test_verification_failure_never_returns_the_free_text(
     wiring = wire(rows=dosage_rows(), llm=NormalLLM(text=FREE_TEXT))
 
     def _boom(*args, **kwargs):
+        """测试用：故意抛出异常。"""
         raise RuntimeError("核验层不可用（替身）")
 
     monkeypatch.setattr(api_module, "_high_risk_answer", _boom)
@@ -430,6 +431,7 @@ def test_unknown_method_is_rejected_before_any_retrieval(
 
 
 def test_missing_question_is_rejected(client, wire):
+    """测试：缺失问题为被拒绝。"""
     wire(rows=dosage_rows())
 
     response = client.post("/api/graphrag", json={"method": "auto"})
@@ -445,6 +447,7 @@ _MAP_ENTRY = re.compile(r"'([a-z_]+)'\s*:\s*'([^']*)'")
 
 
 def _frontend_hr_maps() -> dict[str, dict[str, str]]:
+    """核对前端高风险状态到 CSS 类的映射。"""
     source = FRONTEND.read_text(encoding="utf-8")
     return {
         name: dict(_MAP_ENTRY.findall(body))

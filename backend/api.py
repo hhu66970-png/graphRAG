@@ -18,6 +18,12 @@ from openai import OpenAI
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 sys.path.insert(0, str(PROJECT_ROOT / "graphragexpr"))
 from external_embedder import ExternalEmbedder
 
@@ -40,6 +46,13 @@ MAX_SUBGRAPH_EDGES = 60
 MAX_GRAPH_TRIPLES = 40
 MAX_CONTEXT_CHUNKS = 8
 _LUCENE_SPECIAL = re.compile(r'([+\-&|!(){}\[\]^"~*?:\\/])')
+# 问句里出现的槽位词/范畴词不能当检索实体：否则「人参的性味、归经和功效」
+# 会把「功效」送进全文检索，高频词把大黄等条目排到人参前面。
+_SLOT_QUERY_TERMS = frozenset({
+    "性味", "归经", "功效", "主治", "用法", "用量", "禁忌", "配伍",
+    "中药", "药材", "药性", "炮制", "来源", "概念", "方剂", "典籍",
+    "什么", "哪些", "如何", "怎么", "区别",
+})
 
 
 @lru_cache(maxsize=1)
@@ -49,6 +62,7 @@ def _configured_embedder():
 
 
 def _escape_lucene(term: str) -> str:
+    """转义 Lucene 特殊字符，避免用户问题被当成检索语法。"""
     return _LUCENE_SPECIAL.sub(r"\\\1", term)
 
 
@@ -58,14 +72,21 @@ def _build_fulltext_query(question: str, exact_terms: list[str]) -> str:
     seen: set[str] = set()
 
     def add(term: str) -> None:
+        """把一个检索词追加进 Lucene 查询字符串。"""
         cleaned = term.strip()
         if len(cleaned) < 2 or cleaned in seen:
             return
         seen.add(cleaned)
         terms.append(_escape_lucene(cleaned))
 
-    for name in exact_terms:
-        add(name)
+    anchors = [
+        term.strip()
+        for term in exact_terms
+        if term and term.strip() not in _SLOT_QUERY_TERMS and len(term.strip()) >= 2
+    ]
+    # 问句里已经锚定到药名/功效名时，只搜这些词，避免「功效」「性味」带跑全库。
+    if anchors:
+        return " OR ".join(f'"{_escape_lucene(term)}"' for term in anchors[:8])
 
     compact = re.sub(r"\s+", "", question.lower())
     chinese = "".join(re.findall(r"[\u3400-\u9fff]+", compact))
@@ -80,7 +101,67 @@ def _build_fulltext_query(question: str, exact_terms: list[str]) -> str:
     return " OR ".join(terms[:24]) if terms else _escape_lucene(compact[:40] or "中药")
 
 
+def _is_slot_query_term(name: str) -> bool:
+    """槽位词不能当作检索锚点。"""
+    return "".join((name or "").split()) in _SLOT_QUERY_TERMS
+
+
+def _question_anchor_names(session, question: str) -> list[str]:
+    """从问句里抽出中药/方剂，以及长度足够的功效/主治名。"""
+    rows = session.run(
+        """
+        MATCH (entity)
+        WHERE coalesce(entity.preferred_name, entity.name) IS NOT NULL
+          AND size(coalesce(entity.preferred_name, entity.name)) >= 2
+          AND size(coalesce(entity.preferred_name, entity.name)) <= 20
+          AND $question CONTAINS coalesce(entity.preferred_name, entity.name)
+          AND (
+            entity:中药 OR entity:方剂
+            OR (entity:Entity AND entity.entity_type IN ['HERB', 'FORMULA'])
+            OR (
+              size(coalesce(entity.preferred_name, entity.name)) >= 3
+              AND (
+                entity:功效 OR entity:主治
+                OR (entity:Entity AND entity.entity_type IN ['EFFICACY', 'INDICATION'])
+              )
+            )
+          )
+        RETURN DISTINCT coalesce(entity.preferred_name, entity.name) AS name
+        ORDER BY size(name) DESC
+        LIMIT 12
+        """,
+        question=question,
+    )
+    names = []
+    seen = set()
+    for record in rows:
+        name = (record["name"] or "").strip()
+        if not name or _is_slot_query_term(name) or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def _chunks_mention_anchors(chunks: list[dict], anchors: list[str]) -> list[dict]:
+    """只保留原文提到问句锚点的文本块；有锚点时绝不回退到其他药的条目。"""
+    if not anchors or not chunks:
+        return chunks
+    kept = [
+        chunk
+        for chunk in chunks
+        if any(anchor in (chunk.get("text") or "") for anchor in anchors)
+    ]
+    return kept
+
+
+def _matched_anchor_terms(text: str, anchors: list[str]) -> list[str]:
+    """文本块里实际出现的问句锚点。"""
+    return [anchor for anchor in anchors if anchor and anchor in (text or "")]
+
+
 def _chunk_record(record) -> dict:
+    """把 Neo4j 查询行转成前端/生成可用的文本块字典。"""
     return {
         "id": record["id"],
         "index": record["index"],
@@ -106,25 +187,8 @@ def _keyword_graph_search(
     exact_terms = []
     lexical_candidates = []
     with driver.session(database=database) as session:
+        exact_terms = _question_anchor_names(session, question)
         if use_fulltext:
-            exact_terms = [
-                record["name"]
-                for record in session.run(
-                    """
-                    MATCH (entity)
-                    WHERE (entity:中药 OR entity:方剂 OR entity:功效 OR entity:主治
-                           OR entity:概念 OR entity:典籍 OR entity:性味 OR entity:归经)
-                      AND entity.name IS NOT NULL
-                      AND size(entity.name) >= 2
-                      AND size(entity.name) <= 20
-                      AND $question CONTAINS entity.name
-                    RETURN DISTINCT entity.name AS name
-                    ORDER BY size(entity.name) DESC
-                    LIMIT 20
-                    """,
-                    question=question,
-                )
-            ]
             fulltext_query = _build_fulltext_query(question, exact_terms)
             try:
                 lexical_candidates = [
@@ -132,10 +196,7 @@ def _keyword_graph_search(
                         **_chunk_record(record),
                         "score": float(record["lexical_score"] or 0.0),
                         "lexical_score": float(record["lexical_score"] or 0.0),
-                        "matched_terms": [
-                            term for term in exact_terms
-                            if term and term in (record["text"] or "")
-                        ],
+                        "matched_terms": _matched_anchor_terms(record["text"] or "", exact_terms),
                     }
                     for record in session.run(
                         """
@@ -156,16 +217,17 @@ def _keyword_graph_search(
             except Exception as exc:
                 print(f"Fulltext retrieval fallback ({exc})")
                 # Targeted CONTAINS fallback; never scan every Chunk in Python.
-                seed = exact_terms[:5] or [question[:8]]
+                seed = exact_terms[:5] or [
+                    token
+                    for token in re.findall(r"[\u3400-\u9fff]{2,4}", question)
+                    if not _is_slot_query_term(token)
+                ][:3] or [question[:8]]
                 lexical_candidates = [
                     {
                         **_chunk_record(record),
                         "score": float(record["hit_count"] or 0.0),
                         "lexical_score": float(record["hit_count"] or 0.0),
-                        "matched_terms": [
-                            term for term in exact_terms
-                            if term and term in (record["text"] or "")
-                        ],
+                        "matched_terms": _matched_anchor_terms(record["text"] or "", exact_terms),
                     }
                     for record in session.run(
                         """
@@ -217,6 +279,9 @@ def _keyword_graph_search(
                     query_embedding=query_embedding,
                 )
             ]
+
+        lexical_candidates = _chunks_mention_anchors(lexical_candidates, exact_terms)
+        vector_candidates = _chunks_mention_anchors(vector_candidates, exact_terms)
 
     chunks_by_id = {}
     for chunk in lexical_candidates:
@@ -274,11 +339,14 @@ def _keyword_graph_search(
             chunk["id"] != companion_record["id"] for chunk in ranked_chunks
         ):
             companion = _chunk_record(companion_record)
-            companion["score"] = ranked_chunks[0]["score"] * 0.5
-            companion["lexical_score"] = None
-            companion["vector_score"] = None
-            companion["matched_terms"] = ["相邻文本块"]
-            ranked_chunks = [ranked_chunks[0], companion, *ranked_chunks[1: max(top_k - 1, 0)]]
+            if exact_terms and not _chunks_mention_anchors([companion], exact_terms):
+                companion = None
+            if companion:
+                companion["score"] = ranked_chunks[0]["score"] * 0.5
+                companion["lexical_score"] = None
+                companion["vector_score"] = None
+                companion["matched_terms"] = ["相邻文本块"]
+                ranked_chunks = [ranked_chunks[0], companion, *ranked_chunks[1: max(top_k - 1, 0)]]
 
     chunk_ids = [chunk["id"] for chunk in ranked_chunks]
 
@@ -301,11 +369,13 @@ def _keyword_graph_search(
                 edge_limit=MAX_SUBGRAPH_EDGES,
                 triple_limit=MAX_GRAPH_TRIPLES,
                 extra_chunk_limit=MAX_CONTEXT_CHUNKS,
+                seed_names=exact_terms,
             )
         nodes = {node["id"]: node for node in node_list}
         ranked_chunks = merge_extra_chunks(
             ranked_chunks, extra_chunks, limit=MAX_CONTEXT_CHUNKS
         )
+        ranked_chunks = _chunks_mention_anchors(ranked_chunks, exact_terms)
 
     return ranked_chunks, {"nodes": list(nodes.values()), "edges": edges}, triples
 
@@ -367,6 +437,7 @@ def _retrieve_auto(question):
 
 
 def _sources_from_packet(packet):
+    """从证据包抽出带页码的来源列表，供前端溯源。"""
     return [
         {
             "evidence_id": item.evidence_id,
@@ -491,7 +562,7 @@ def _retrieve_keyword_graph(
 def _generate_keyword_graph(question, chunks, triples, *, use_graph=True):
     """原生检索的**生成部分**。非高风险问题才会走到这里。"""
     if not chunks:
-        raise RuntimeError("数据库中没有可检索的教材文本块")
+        return "未检索到与问题直接相关的教材原文，无法根据当前图检索结果作答。请改用「自动路由」，或换一种包含药名的问法。"
 
     textbook_context = []
     for position, chunk in enumerate(chunks, start=1):
@@ -510,6 +581,9 @@ def _generate_keyword_graph(question, chunks, triples, *, use_graph=True):
         prompt = f"""请严格依据下面的《中药学》教材片段与知识图谱关系回答问题。
 图谱关系可能来自其他页的文本块，请把多块证据拼成完整答案，不要只根据第一段作答。
 优先使用教材原文中的定义和分类；关键结论后标注对应的 PDF 页码。
+如果问题问的是某一味药（如人参），只能使用主语为该药的证据；
+不得把其他药物（如大黄、黄芪）的性味、归经或功效说成该药的属性。
+若片段与图谱都不含该药的对应条目，必须明确说「未检索到」，不得改用其他药凑答案。
 如果问题涉及剂量、毒性或临床建议，提醒用户以教材原文和专业人员意见为准。
 
 # 问题
@@ -524,6 +598,7 @@ def _generate_keyword_graph(question, chunks, triples, *, use_graph=True):
     else:
         prompt = f"""请严格依据下面的《中药学》向量检索片段回答问题。
 只能使用下列原文，不得调用或补充知识图谱关系，也不得引入未出现在片段中的配伍、禁忌或跨页事实。
+如果问题问的是某一味药，不得用片段里其他药物的属性代替作答；没有该药原文时必须说明未检索到。
 关键结论后标注对应的 PDF 页码。
 如果问题涉及剂量、毒性或临床建议，提醒用户以教材原文和专业人员意见为准。
 
@@ -1394,7 +1469,7 @@ def _warmup_embedder():
         return
     try:
         _configured_embedder()
-        print("✓ 向量模型已预热，向量/混合检索可直接使用")
+        print("[ok] 向量模型已预热，向量检索可直接使用")
     except Exception as exc:
         print(f"向量模型预热失败（不影响自动路由）：{exc}")
 

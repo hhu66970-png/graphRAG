@@ -58,6 +58,7 @@ OPTIONS {{indexConfig: {{`fulltext.analyzer`: '{analyzer}'}}}}
 
 
 def available_analyzers(store: Neo4jStore) -> set[str]:
+    """列出 Neo4j 可用的全文分析器（含 cjk）。"""
     rows = store.run("CALL db.index.fulltext.listAvailableAnalyzers() YIELD analyzer RETURN analyzer")
     return {row["analyzer"] for row in rows}
 

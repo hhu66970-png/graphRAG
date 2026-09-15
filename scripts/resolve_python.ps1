@@ -1,4 +1,5 @@
-﻿# Resolve a project Python without depending on whichever python.exe appears first in PATH.
+﻿# resolve_python.ps1
+# 解析本项目应使用的 Python（优先 .venv / 指定 conda 环境），避免误用 PATH 里的解释器。
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $candidates = [System.Collections.Generic.List[string]]::new()

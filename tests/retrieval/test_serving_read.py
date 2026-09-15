@@ -1,19 +1,25 @@
+"""测试 Serving 层读接口（交集、路径、证据）。"""
+
 from __future__ import annotations
 
 from graphragexpr.storage import serving_read
 
 
 class FakeStore:
+    """FakeStore：测试替身，用来隔离真实 Neo4j 或 LLM。"""
     def __init__(self, rows: list[dict]):
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.rows = rows
         self.calls: list[tuple[str, dict]] = []
 
     def run(self, query: str, **params):
+        """测试替身：模拟 Neo4j session.run，记录查询参数。"""
         self.calls.append((query, params))
         return self.rows
 
 
 def test_intersection_groups_exact_and_partial_matches():
+    """测试：交集分组精确且部分匹配。"""
     store = FakeStore(
         [
             {
@@ -73,11 +79,15 @@ def test_intersection_groups_exact_and_partial_matches():
 
 
 def test_intersection_uses_compound_efficacy_names_when_ids_miss():
+    """测试：交集使用复合功效名称当ID未命中。"""
     class SwitchingStore:
+        """SwitchingStore：测试替身，用来隔离真实 Neo4j 或 LLM。"""
         def __init__(self):
+            """初始化该对象，保存后续调用所需的配置或依赖。"""
             self.calls: list[dict] = []
 
         def run(self, query, **params):
+            """测试替身：模拟 Neo4j session.run，记录查询参数。"""
             self.calls.append(params)
             if params.get("names"):
                 return [
@@ -133,6 +143,7 @@ def test_intersection_uses_compound_efficacy_names_when_ids_miss():
 
 
 def test_path_query_caps_hops_and_requires_serving_provenance():
+    """测试：路径查询限制跳且要求Serving溯源。"""
     store = FakeStore([])
 
     serving_read.find_supported_paths(
@@ -152,6 +163,7 @@ def test_path_query_caps_hops_and_requires_serving_provenance():
 
 
 def test_path_query_rejects_same_endpoint():
+    """测试：路径查询拒绝相同端点。"""
     store = FakeStore([])
 
     try:
@@ -163,6 +175,7 @@ def test_path_query_rejects_same_endpoint():
 
 
 def test_load_evidence_uses_assertion_relationships_and_decodes_qualifiers():
+    """测试：加载证据使用断言关系且解码限定符。"""
     store = FakeStore(
         [
             {
@@ -186,6 +199,7 @@ def test_load_evidence_uses_assertion_relationships_and_decodes_qualifiers():
 
 
 def test_load_entity_sections_uses_assertion_provenance_relationships():
+    """测试：加载实体章节使用断言溯源关系。"""
     store = FakeStore([])
 
     serving_read.load_entity_sections(

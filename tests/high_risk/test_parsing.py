@@ -103,6 +103,7 @@ def test_page_reference_is_not_a_dose():
 
 
 def test_no_dosage_yields_empty_list():
+    """测试：没有剂量得到空列表。"""
     assert parse_dosage_units("") == []
     assert parse_dosage_units("   ") == []
     # 「适量外用」解析不出数值：由组装层保留为不明确单元，解析层不猜数值
@@ -110,6 +111,7 @@ def test_no_dosage_yields_empty_list():
 
 
 def test_single_value_binding():
+    """测试：单个值绑定。"""
     binding = parse_dosage_units("研末服，0.5g")[0]
 
     assert binding.is_single_value is True

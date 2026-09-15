@@ -55,6 +55,7 @@ QUOTE_LABEL = "原文依据："
 
 
 def _page_text(unit: ConditionalEvidenceUnit) -> str:
+    """把页码格式化成「第 x 页」。"""
     if not unit.page_available or unit.page_start is None:
         return "页码不可用"
     if unit.page_end in (None, unit.page_start):
@@ -63,11 +64,13 @@ def _page_text(unit: ConditionalEvidenceUnit) -> str:
 
 
 def _quote_line(unit: ConditionalEvidenceUnit) -> str:
+    """渲染一条带引用的证据行。"""
     quote = " ".join(unit.evidence_quote.split())
     return f"{QUOTE_LABEL}「{quote}」（{_page_text(unit)}）"
 
 
 def _severity_clause(unit: ConditionalEvidenceUnit) -> str:
+    """渲染程度用语（禁用/慎用）。"""
     if unit.severity is RestrictionSeverity.UNSPECIFIED:
         # 教材未给程度词时如实说明，不用「慎用」等近似词替代。
         return "原文未标注禁用／忌用／慎用程度"
@@ -146,6 +149,7 @@ def _condition_parts(
 
 
 def _dosage_line(unit: ConditionalEvidenceUnit) -> str:
+    """渲染一条剂量表述。"""
     head = f"{unit.subject_name}：用量{unit.dosage.raw if unit.dosage else ''}"
     if unit.dosage and not unit.dosage.unit_raw:
         head += "（原文此处未紧邻单位，未做补全）"
@@ -155,6 +159,7 @@ def _dosage_line(unit: ConditionalEvidenceUnit) -> str:
 
 
 def _restriction_line(unit: ConditionalEvidenceUnit) -> str:
+    """渲染一条使用限制。"""
     target = unit.object_name or "（未识别到明确对象）"
     category_label = (
         "使用禁忌" if unit.risk_category is RiskCategory.CONTRAINDICATION else "配伍禁忌"
@@ -220,6 +225,7 @@ def _parse_code(note: str) -> str | None:
 
 
 def _display_note(note: str) -> str:
+    """渲染给前端看的补充说明。"""
     return _PARSE_CODE_RE.sub("", note).strip()
 
 

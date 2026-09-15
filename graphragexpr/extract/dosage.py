@@ -45,6 +45,7 @@ _CONDITION_PATTERNS = (
 
 
 def _canonical_unit(raw_unit: str | None) -> str | None:
+    """把剂量单位规范成统一写法（如 g）。"""
     if not raw_unit:
         return None
     return _UNIT_CANONICAL.get(raw_unit.strip(), raw_unit.strip().lower())

@@ -114,6 +114,7 @@ def _is_incompatibility_question(question: str) -> bool:
 
 
 def _mentioned_predicates(question: str, ontology: Ontology) -> tuple[str, ...]:
+    """从问题词里识别提到的谓词。"""
     mentioned: list[str] = []
     for terms, predicates in _PREDICATE_TERMS:
         if any(term in question for term in terms):

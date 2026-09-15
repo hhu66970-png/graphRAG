@@ -1,5 +1,5 @@
 ﻿# run_tests.ps1
-# Run local tests that do not require Neo4j or an LLM.
+# 跑不依赖 Neo4j/LLM 的本地 pytest。
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "GraphRAG Test Suite" -ForegroundColor Cyan

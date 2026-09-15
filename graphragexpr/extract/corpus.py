@@ -15,6 +15,7 @@ SENTENCE_END_RE = re.compile(r"[。！？；]\s*$")
 
 @dataclass(frozen=True)
 class ChunkRecord:
+    """ChunkRecord：本文件定义的数据结构或组件。"""
     index: int
     text: str
     page_start: int | None
@@ -23,10 +24,12 @@ class ChunkRecord:
     source: str
 
     def to_dict(self) -> dict:
+        """把数据类转成普通字典。"""
         return asdict(self)
 
 
 def _split_pages(markdown: str) -> list[tuple[int | None, str]]:
+    """按页码标记切开 Markdown。"""
     matches = list(PAGE_RE.finditer(markdown))
     if not matches:
         return [(None, markdown)]
@@ -39,6 +42,7 @@ def _split_pages(markdown: str) -> list[tuple[int | None, str]]:
 
 
 def _paragraphs(text: str) -> list[str]:
+    """按段落切分页面文本。"""
     return [re.sub(r"\s+", " ", part).strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
 
 
@@ -48,6 +52,7 @@ def load_chunk_records(
     overlap: int = 120,
     max_chunks: int | None = None,
 ) -> list[ChunkRecord]:
+    """把教材 Markdown 切成带页码的 ChunkRecord。"""
     source_path = Path(path)
     if not source_path.is_file():
         raise FileNotFoundError(
@@ -66,6 +71,7 @@ def load_chunk_records(
     carry_section = ""
 
     def emit(text: str, start_page: int | None, end_page: int | None, section: str) -> None:
+        """向结果列表追加一条记录。"""
         clean = text.strip()
         if clean:
             records.append(ChunkRecord(len(records), clean, start_page, end_page, section, source_path.name))
@@ -110,6 +116,7 @@ def load_chunk_records(
 
 
 def records_from_environment() -> list[ChunkRecord]:
+    """按 .env 中的语料路径与块大小加载文本块。"""
     root = Path(__file__).resolve().parents[2]
     corpus_path = Path(os.getenv("CORPUS_PATH", root / "origdata" / "zhongyaoxue.md"))
     max_chunks = int(os.getenv("MAX_CHUNKS", "30"))

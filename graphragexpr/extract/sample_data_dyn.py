@@ -4,10 +4,12 @@ from corpus import records_from_environment
 
 
 def get_chunk_records():
+    """兼容老师仓库接口，返回带元数据的文本块。"""
     return records_from_environment()
 
 
 def get_chunks():
+    """兼容老师仓库接口，只返回块文本列表。"""
     return [record.text for record in get_chunk_records()]
 
 

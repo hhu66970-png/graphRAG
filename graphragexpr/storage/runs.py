@@ -24,6 +24,7 @@ SUPERSEDED = "SUPERSEDED"
 
 @dataclass(frozen=True)
 class RunHandle:
+    """RunHandle：本文件定义的数据结构或组件。"""
     run_id: str
     status: str
     created_at: str
@@ -50,6 +51,7 @@ def start_run(store: Neo4jStore, *, settings_snapshot: dict, notes: str = "") ->
 
 
 def get_active_run(store: Neo4jStore) -> str | None:
+    """读取当前标记为 ACTIVE 的构建版本。"""
     rows = store.run(
         "MATCH (r:IngestRun {status: $status}) RETURN r.run_id AS run_id "
         "ORDER BY r.created_at DESC LIMIT 1",

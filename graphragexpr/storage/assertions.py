@@ -92,6 +92,7 @@ MERGE (a)-[:IN_RUN]->(r)
 
 
 def upsert_document(store: Neo4jStore, *, document_id: str, name: str, source: str, run_id: str) -> None:
+    """写入或更新 Document 节点。"""
     store.run(
         """
         MERGE (d:Document {document_id: $document_id})
@@ -104,6 +105,7 @@ def upsert_document(store: Neo4jStore, *, document_id: str, name: str, source: s
 def upsert_entities(
     store: Neo4jStore, entities: Sequence[EntityRecord], *, run_id: str, batch_size: int
 ) -> int:
+    """批量写入实体节点。"""
     rows = [
         {
             "canonical_id": e.canonical_id,
@@ -125,6 +127,7 @@ def upsert_entities(
 def upsert_chunks(
     store: Neo4jStore, chunks: Sequence[ChunkRecord], *, run_id: str, batch_size: int
 ) -> int:
+    """批量写入文本块节点。"""
     rows = [
         {
             "chunk_id": c.chunk_id,

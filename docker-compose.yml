@@ -1,3 +1,5 @@
+# 本文件只负责在本机拉起 Neo4j 5.26（浏览器 7474，Bolt 7687）。
+# 应用代码与 Flask 不在容器里跑。
 services:
   neo4j:
     image: neo4j:5.26-community

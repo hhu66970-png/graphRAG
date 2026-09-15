@@ -61,6 +61,7 @@ def test_restricted_use_keeps_the_contraindication():
 
 
 def test_positive_polarity_without_negation_cues_holds():
+    """测试：肯定极性没有否定线索成立。"""
     interpretation = interpret(
         "INCOMPATIBLE_WITH", "POSITIVE", "麻黄与藜芦同用需谨慎。", "藜芦"
     )

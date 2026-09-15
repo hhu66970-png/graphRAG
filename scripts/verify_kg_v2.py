@@ -1,6 +1,6 @@
 """Verify the v2 graph against the defects measured on the legacy graph.
 
-对照维度全部来自 `docs/KG构建环节改进技术文档.md` §1 实测的旧图缺陷：
+对照维度来自旧图实测缺陷：
 同名跨类型身份、笛卡尔积冗余边、关系类型爆炸、证据缺失、静默降级。
 
 只读，不修改任何数据。
@@ -30,6 +30,7 @@ LEGACY_FILTER = (
 
 
 def compare(store: Neo4jStore, run_id: str) -> None:
+    """对比新旧图谱在示例问题上的表现。"""
     print("=" * 74)
     print(f"新旧对照（ACTIVE run = {run_id}）")
     print("=" * 74)
@@ -176,6 +177,7 @@ def show_herb(store: Neo4jStore, run_id: str, herb: str) -> None:
 
 
 def main() -> int:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Verify the v2 KG against legacy defects")
     parser.add_argument("--herb", default="人参", help="用于属性聚合演示的药名")

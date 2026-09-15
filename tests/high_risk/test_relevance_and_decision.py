@@ -32,12 +32,14 @@ FUZI = "H:附子"
 
 
 def service_for(rows, *, budget: int = 3000) -> HighRiskService:
+    """构造带假存储的高风险服务。"""
     return HighRiskService(
         FakeHighRiskStore(rows), run_id="run-test", unit_token_budget=budget
     )
 
 
 def linked_fuzi() -> list[dict]:
+    """测试用：已链接的附子实体。"""
     return [{"canonical_id": FUZI, "entity_type": "HERB", "preferred_name": "附子"}]
 
 
@@ -51,6 +53,7 @@ def contra(
     subject_name: str = "附子",
     subject_id: str = FUZI,
 ) -> dict:
+    """测试用：禁忌证据行。"""
     return assertion_row(
         assertion_id=assertion_id,
         predicate="CONTRAINDICATED_IN",
@@ -67,6 +70,7 @@ def contra(
 
 
 def incompat(assertion_id: str, *, object_name: str, quote: str, page: int) -> dict:
+    """测试用：配伍禁忌证据行。"""
     return assertion_row(
         assertion_id=assertion_id,
         predicate="INCOMPATIBLE_WITH",
@@ -84,6 +88,7 @@ def incompat(assertion_id: str, *, object_name: str, quote: str, page: int) -> d
 
 #: 与真实库同一形态的一批证据：孕妇慎用、妊娠慎用、另一个人群的忌用。
 def fuzi_rows() -> list[dict]:
+    """测试用：附子相关高风险行。"""
     return [
         contra("a-p231", object_name="孕妇", quote="孕妇慎用。", page=231),
         contra(
@@ -103,10 +108,12 @@ def fuzi_rows() -> list[dict]:
 
 
 def answer(question: str, rows: list[dict]):
+    """调用服务得到高风险回答。"""
     return service_for(rows).answer(question, linked_entities=linked_fuzi())
 
 
 def units_of(rows):
+    """从回答中取出证据单元。"""
     from graphragexpr.highrisk.units import build_units_from_assertions
 
     return build_units_from_assertions(rows)

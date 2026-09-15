@@ -92,6 +92,7 @@ class CachingLLMClient:
     """
 
     def __init__(self, inner: OpenAICompatibleClient, settings: KGSettings) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._inner = inner
         self._settings = settings
         self._lock = threading.Lock()
@@ -101,17 +102,21 @@ class CachingLLMClient:
 
     @property
     def usage(self):
+        """累计 LLM token 用量。"""
         return self._inner.usage
 
     @property
     def failures(self):
+        """返回 LLM 失败清单。"""
         return self._inner.failures
 
     def _key(self, purpose: str, user: str, schema: type[BaseModel]) -> Path:
+        """构造缓存键。"""
         raw = "␟".join([purpose, user, schema.__name__, *self._settings.cache_key_parts()])
         return CACHE_DIR / f"{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}.json"
 
     def complete_json(self, *, system: str, user: str, schema: type[BaseModel], purpose: str):
+        """调用 LLM 并校验返回值为指定 JSON Schema。"""
         path = self._key(purpose, user, schema)
         if path.exists():
             with self._lock:
@@ -128,10 +133,12 @@ class LockedResolver:
     """Thread-safe facade over EntityResolver (AliasStore 是共享可变状态)."""
 
     def __init__(self, inner: EntityResolver) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._inner = inner
         self._lock = threading.Lock()
 
     def resolve(self, surface: str, entity_type: str, *, context: str = ""):
+        """解析实体表面名为 canonical 实体。"""
         with self._lock:
             return self._inner.resolve(surface, entity_type, context=context)
 
@@ -201,6 +208,7 @@ def migrate_chunks(
 
 
 def main() -> int:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Build the v2 evidence KG")
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个文本块")
@@ -244,6 +252,7 @@ def main() -> int:
         progress_lock = threading.Lock()
 
         def work(chunk: ChunkRecord):
+            """建图子进程/线程中处理一批文本块。"""
             extractor = ChunkExtractor(
                 ontology=ontology, settings=settings, resolver=resolver,
                 llm=llm, run_id=run.run_id,
@@ -310,6 +319,7 @@ def main() -> int:
                 print(f"      跳过的锚点: {skipped_anchors[:10]}")
 
             def complete(item):
+                """完成一次 LLM JSON 补全。"""
                 chunk, name, ids, pages = item
                 extractor = ChunkExtractor(
                     ontology=ontology, settings=settings, resolver=resolver,

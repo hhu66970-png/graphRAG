@@ -26,6 +26,7 @@ class Neo4jStore:
         password: str | None = None,
         database: str | None = None,
     ) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._url = url or os.getenv("NEO4J_URL")
         self._user = user or os.getenv("NEO4J_USER")
         self._password = password or os.getenv("NEO4J_PASSWORD")
@@ -45,13 +46,16 @@ class Neo4jStore:
 
     @property
     def database(self) -> str | None:
+        """返回当前会话使用的 Neo4j 数据库名。"""
         return self._database
 
     def verify(self) -> None:
+        """调用驱动探测 Bolt 连通性。"""
         self.driver.verify_connectivity()
 
     @contextmanager
     def session(self) -> Iterator[Any]:
+        """打开指定 database 的 Neo4j 会话。"""
         with self.driver.session(database=self._database) as session:
             yield session
 
@@ -73,18 +77,22 @@ class Neo4jStore:
         return written
 
     def close(self) -> None:
+        """关闭底层 Driver 连接池。"""
         if self._driver is not None:
             self._driver.close()
             self._driver = None
 
     def __enter__(self) -> "Neo4jStore":
+        """进入 with 语句时返回自身。"""
         return self
 
     def __exit__(self, *exc: object) -> None:
+        """退出 with 语句时关闭连接或释放资源。"""
         self.close()
 
 
 def chunked(items: Iterable[dict], size: int) -> Iterator[list[dict]]:
+    """按批大小切分写入行。"""
     batch: list[dict] = []
     for item in items:
         batch.append(item)

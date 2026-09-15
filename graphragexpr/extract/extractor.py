@@ -93,11 +93,13 @@ _ENTRY_USER_TEMPLATE = """本片段出自《中药学》中【{anchor}】的条�
 
 
 class _RawEntity(BaseModel):
+    """_RawEntity：本模块内部使用的数据结构。"""
     name: str
     entity_type: str
 
 
 class _RawRelation(BaseModel):
+    """_RawRelation：本模块内部使用的数据结构。"""
     subject: str
     predicate: str
     object_text: str
@@ -123,6 +125,7 @@ class ExtractionOutcome:
     unknown_predicates: list[str] = field(default_factory=list)
 
     def counts(self) -> dict:
+        """汇总本块抽取的接受/拒绝/未知类型计数。"""
         by_status: dict[str, int] = {}
         for a in self.assertions:
             by_status[a.validation_status] = by_status.get(a.validation_status, 0) + 1
@@ -147,6 +150,7 @@ class ChunkExtractor:
         llm: LLMClient,
         run_id: str,
     ) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._ontology = ontology
         self._settings = settings
         self._resolver = resolver
@@ -274,6 +278,7 @@ class ChunkExtractor:
         page_range: tuple[int, int] | None = None,
         is_cross_chunk: bool = False,
     ) -> AssertionRecord | None:
+        """把一条通过校验的关系组装成 AssertionRecord。"""
         try:
             predicate = self._ontology.resolve_predicate(relation.predicate)
         except OntologyError:
@@ -388,6 +393,7 @@ class ChunkExtractor:
         """Second-pass verification. 只依据提供的证据，不允许调用常识（SKILL §8.4）。"""
 
         class _Verdict(BaseModel):
+            """_Verdict：本模块内部使用的数据结构。"""
             verdict: str
 
         # 注意：OpenAI 兼容接口在 response_format=json_object 下要求消息中出现

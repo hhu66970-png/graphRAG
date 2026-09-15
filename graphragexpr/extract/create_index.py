@@ -1,3 +1,5 @@
+"""旧管线脚本：为文本块创建 Neo4j 向量索引。"""
+
 # create_index.py
 import os
 from dotenv import load_dotenv

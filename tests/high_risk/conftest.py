@@ -81,10 +81,12 @@ class FakeHighRiskStore:
     """In-memory stand-in for the read paths used by the high-risk service."""
 
     def __init__(self, rows: list[dict] | None = None) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.rows = list(rows or [])
         self.calls: list[dict] = []
 
     def run(self, cypher: str, **params):
+        """测试替身：执行一条 Cypher 并返回假结果。"""
         self.calls.append({"cypher": cypher, **params})
         if "EVIDENCED_BY" not in cypher:
             return []
@@ -114,6 +116,7 @@ class FakeHighRiskStore:
         return [dict(row) for row in matched[: params.get("limit", len(matched))]]
 
     def close(self) -> None:  # pragma: no cover - parity with Neo4jStore
+        """关闭底层 Driver 连接池。"""
         return None
 
 
@@ -124,10 +127,12 @@ class ScriptedLLM:
     """
 
     def __init__(self, responses: list[ClaimBatch | BaseModel | Exception]) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._responses = list(responses)
         self.calls: list[dict] = []
 
     def complete_json(self, *, system: str, user: str, schema, purpose: str):
+        """调用 LLM 并校验返回值为指定 JSON Schema。"""
         self.calls.append({"system": system, "user": user, "purpose": purpose})
         if not self._responses:
             return schema(claims=[])
@@ -138,6 +143,7 @@ class ScriptedLLM:
 
 
 def batch(*claims) -> ClaimBatch:
+    """测试夹具：批量写入高风险样例数据。"""
     return ClaimBatch(claims=list(claims))
 
 

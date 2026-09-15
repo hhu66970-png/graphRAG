@@ -14,16 +14,19 @@ from dataclasses import asdict, dataclass, fields
 
 
 def _env_float(name: str, default: float) -> float:
+    """从环境变量读取浮点阈值，缺省则用代码默认值。"""
     raw = os.getenv(name)
     return float(raw) if raw not in (None, "") else default
 
 
 def _env_int(name: str, default: int) -> int:
+    """从环境变量读取整数配置。"""
     raw = os.getenv(name)
     return int(raw) if raw not in (None, "") else default
 
 
 def _env_bool(name: str, default: bool) -> bool:
+    """从环境变量读取布尔开关。"""
     raw = os.getenv(name)
     if raw in (None, ""):
         return default
@@ -96,6 +99,7 @@ class KGSettings:
 
     @classmethod
     def field_names(cls) -> tuple[str, ...]:
+        """返回配置字段名列表。"""
         return tuple(f.name for f in fields(cls))
 
 
@@ -117,11 +121,13 @@ class RetrievalSettings:
     token_budget: int = _env_int("RETRIEVAL_TOKEN_BUDGET", 4000)
 
     def __post_init__(self) -> None:
+        """数据类实例创建后做校验或补默认值。"""
         for setting in fields(self):
             if getattr(self, setting.name) <= 0:
                 raise ValueError(f"{setting.name} must be positive")
 
     def snapshot(self) -> dict:
+        """导出当前阈值快照，便于评测复现实验配置。"""
         return asdict(self)
 
 

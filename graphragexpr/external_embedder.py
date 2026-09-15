@@ -17,6 +17,7 @@ class ExternalEmbedder:
     """Generate matching query/document vectors with the configured provider."""
 
     def __init__(self, dimension: int | None = None):
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.dimension = dimension or int(os.getenv("EMBED_DIM", "512"))
         self.provider = (os.getenv("EMBED_PROVIDER") or "hash").strip().lower()
         self.endpoint = (os.getenv("EMBED_ENDPOINT") or "").strip()
@@ -59,7 +60,7 @@ class ExternalEmbedder:
                 self.query_prefix = "为这个句子生成表示以用于检索相关文章："
             self.query_prefix = self.query_prefix or ""
             print(
-                f"✓ 使用本地向量模型: {self.model_name} "
+                f"[ok] 使用本地向量模型: {self.model_name} "
                 f"({self.dimension} 维, {device})"
             )
         elif self.provider == "external":
@@ -76,19 +77,20 @@ class ExternalEmbedder:
                 raise RuntimeError(f"外部向量接口缺少配置：{', '.join(missing)}")
             self.client = OpenAI(api_key=self.token, base_url=self.endpoint)
             self.query_prefix = self.query_prefix or ""
-            print(f"✓ 使用外部向量模型: {self.model_name}")
+            print(f"[ok] 使用外部向量模型: {self.model_name}")
         elif self.provider == "hash":
             from custom_embedder import SimpleHashEmbedder
 
             self.fallback = SimpleHashEmbedder(dimension=self.dimension)
             self.query_prefix = ""
-            print("⚠ 使用显式 hash 演示向量；该模式不具备语义检索能力")
+            print("[warn] 使用显式 hash 演示向量；该模式不具备语义检索能力")
         else:
             raise RuntimeError(
                 f"未知 EMBED_PROVIDER={self.provider!r}，应为 local、external 或 hash"
             )
 
     def _validate(self, embedding: Iterable[float]) -> list[float]:
+        """校验嵌入向量维度与提供方配置。"""
         vector = np.asarray(list(embedding), dtype=np.float32)
         if vector.shape != (self.dimension,):
             raise RuntimeError(

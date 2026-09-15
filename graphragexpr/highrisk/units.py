@@ -44,6 +44,7 @@ def _stable_unit_id(*parts: object) -> str:
 
 
 def _first(values: list, index: int):
+    """取序列中第一个非空值。"""
     return values[index] if index < len(values) else None
 
 

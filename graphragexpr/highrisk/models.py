@@ -99,6 +99,7 @@ class EvidenceCard(_Base):
 
     @classmethod
     def from_unit(cls, unit: ConditionalEvidenceUnit) -> "EvidenceCard":
+        """由证据单元构造一条候选结论。"""
         from .render import unresolved_flags  # 局部导入：render 依赖本模块
 
         return cls(

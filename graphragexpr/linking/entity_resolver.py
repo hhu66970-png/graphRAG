@@ -73,20 +73,25 @@ class AliasStore:
             )
 
     def get(self, canonical: str) -> EntityRecord | None:
+        """按 canonical_id 取已注册实体。"""
         return self._by_canonical.get(canonical)
 
     def lookup(self, entity_type: str, surface: str) -> str | None:
+        """在指定类型下按表面名查找实体。"""
         return self._by_name.get((entity_type, normalize_text(surface)))
 
     def names_of_type(self, entity_type: str) -> set[str]:
+        """列出某类型下已登记的规范名。"""
         return self._names_by_type[entity_type]
 
     def all_records(self) -> list[EntityRecord]:
+        """返回全部已注册实体。"""
         return list(self._by_canonical.values())
 
 
 @dataclass(frozen=True)
 class LinkDecision:
+    """LinkDecision：本文件定义的数据结构或组件。"""
     record: EntityRecord
     is_new: bool
     candidates: tuple[tuple[str, float], ...] = ()
@@ -101,6 +106,7 @@ class EntityResolver:
         settings: KGSettings,
         vector_candidates: VectorCandidateProvider | None = None,
     ) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._store = store
         self._settings = settings
         self._vector_candidates = vector_candidates
@@ -189,6 +195,7 @@ class EntityResolver:
         return results[: self._settings.link_max_candidates]
 
     def _character_candidates(self, entity_type: str, normalized: str) -> list[tuple[str, float]]:
+        """用字符相似度召回同类型候选实体。"""
         results: list[tuple[str, float]] = []
         max_edit = self._settings.link_max_edit_distance
         for known in self._store.names_of_type(entity_type):
@@ -203,6 +210,7 @@ class EntityResolver:
 
     @staticmethod
     def _merge_candidates(*candidate_lists: list[tuple[str, float]]) -> list[tuple[str, float]]:
+        """合并多层召回的候选并去重。"""
         merged: dict[str, float] = {}
         for candidate_id, score in [c for lst in candidate_lists for c in lst]:
             merged[candidate_id] = max(merged.get(candidate_id, 0.0), score)
@@ -211,6 +219,7 @@ class EntityResolver:
     def _merge_alias(
         self, target_id: str, surface: str, method: str, confidence: float
     ) -> EntityRecord:
+        """把别名并入已存在实体。"""
         record = self._store.get(target_id)
         assert record is not None
         updated = record.model_copy(
@@ -225,6 +234,7 @@ class EntityResolver:
     def _create(
         self, surface: str, entity_type: str, method: str, confidence: float, review: str
     ) -> EntityRecord:
+        """为无法链接的表面名新建实体记录。"""
         return self._store.register(
             EntityRecord(
                 canonical_id=canonical_id(entity_type, surface),

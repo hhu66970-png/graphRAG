@@ -37,6 +37,7 @@ ORDER BY c.index
 
 
 def main() -> int:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Calibrate the acceptance threshold")
     parser.add_argument("--run", default=None)

@@ -14,6 +14,7 @@ from build_kg_dyn import (
 
 
 def test_parse_json_response_accepts_markdown_fence():
+    """测试：解析JSON响应接受Markdown代码围栏。"""
     payload = {
         "entities": [{"name": "人参", "type": "中药"}],
         "relationships": [],
@@ -23,15 +24,18 @@ def test_parse_json_response_accepts_markdown_fence():
 
 
 def test_parse_json_response_finds_surrounding_object():
+    """测试：解析JSON响应找到包裹的宾语。"""
     result = parse_json_response('说明如下：{"entities": [], "relationships": []}。')
     assert result == {"entities": [], "relationships": []}
 
 
 def test_entity_type_alias_and_allowlist():
+    """测试：实体类型别名且白名单。"""
     assert normalize_entity_type("药材") == "中药"
     assert normalize_entity_type("公司") == "概念"
 
 
 def test_relationship_type_is_safe_for_cypher():
+    """测试：关系类型为安全用于Cypher。"""
     assert normalize_relationship_type("具有 功效`) MATCH (n)") == "具有_功效_MATCH_n"
     assert normalize_relationship_type("") == "相关"

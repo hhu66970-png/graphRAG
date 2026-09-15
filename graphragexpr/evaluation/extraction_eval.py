@@ -44,6 +44,7 @@ RETURN collect(a.object_value_json) AS values
 
 @dataclass
 class FieldScore:
+    """FieldScore：本文件定义的数据结构或组件。"""
     predicate: str
     gold: int = 0
     predicted: int = 0
@@ -55,18 +56,22 @@ class FieldScore:
 
     @property
     def recall(self) -> float:
+        """计算字段级召回率（教材字段被抽到的比例）。"""
         return self.matched / self.gold if self.gold else 0.0
 
     @property
     def field_precision(self) -> float:
+        """计算字段精确率下界（预测落在教材字段内的比例）。"""
         return self.matched / self.predicted if self.predicted else 0.0
 
     @property
     def f1(self) -> float:
+        """由召回与字段精确率下界计算 F1。"""
         p, r = self.field_precision, self.recall
         return 2 * p * r / (p + r) if (p + r) else 0.0
 
     def as_dict(self) -> dict:
+        """把评测结果转成可序列化字典。"""
         return {
             "predicate": self.predicate,
             "gold_values": self.gold,

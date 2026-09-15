@@ -157,6 +157,7 @@ class AskedConditions:
 
     @classmethod
     def from_question(cls, question: str) -> "AskedConditions":
+        """从用户问题解析适用性约束（剂型、人群等）。"""
         return cls(
             population=extract_population(question),
             preparation=extract_preparation(question),
@@ -181,10 +182,12 @@ class ApplicabilityAssessment:
 
     @property
     def allows_grounded(self) -> bool:
+        """当前约束是否允许给出「已核验」结论。"""
         return self.verdict is Applicability.APPLICABLE
 
 
 def _matches_population(unit: ConditionalEvidenceUnit, asked: str) -> bool:
+    """判断证据适用人群是否覆盖问题中的人群。"""
     return same_population(asked, unit.population)
 
 
@@ -335,6 +338,7 @@ def longer_object_span(question: str, name: str) -> str | None:
 
 
 def _is_han(char: str) -> bool:
+    """判断字符是否为汉字。"""
     return "一" <= char <= "鿿"
 
 

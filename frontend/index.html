@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- 中药学 GraphRAG 问答页：三栏布局（对话 / 子图 / 溯源），由 Flask 托管。 -->
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -1253,7 +1254,7 @@
                             <option value="keyword_graph">图检索</option>
                         </select>
                     </div>
-                    <p class="hint-text">自动路由按问题走证据图谱。图检索会按实体补其他页的关系与原文。向量检索只用向量命中的文本块，不查图谱、不补邻居。</p>
+                    <p class="hint-text">默认请用「自动路由」（按问题走证据图谱）。「图检索」是课程对照：现已按问句中的药名锚定，不再用「功效」「性味」这类槽位词去搜全库。「向量检索」只用向量命中的文本块，不查图谱。</p>
                 </div>
             </details>
 
@@ -1287,7 +1288,9 @@
         </aside>
     </div>
 
+    <!-- 本页是问答前端：向 Flask /api 发请求，用 D3 画检索子图，不直连 Neo4j。 -->
     <script>
+        // 后端接口前缀；图谱节点/边来自 /api/graphrag 的 subgraph，不是浏览器直连数据库。
         const API_BASE = '/api';
         const MAX_SUBGRAPH_NODES = 80;
 
@@ -1314,10 +1317,12 @@
             'default': '#7A8A80'
         };
 
+        /** 按实体中文类型取节点颜色。 */
         function getNodeColor(type) {
             return colorScheme[type] || colorScheme['default'];
         }
 
+        /** 控制空态提示与演示动画的显示。 */
         function setEmptyHintVisible(visible) {
             const hint = document.getElementById('empty-hint');
             if (hint) hint.style.display = visible ? 'block' : 'none';
@@ -1325,6 +1330,7 @@
             if (demo) demo.style.display = visible ? 'block' : 'none';
         }
 
+        /** 把接口返回的节点边拷成 D3 可用的纯数据（去掉对象引用）。 */
         function cloneGraphPayload(data) {
             const nodes = (data.nodes || []).map(n => ({
                 id: n.id,
@@ -1342,6 +1348,7 @@
             return { nodes, edges };
         }
 
+        /** 子图节点过多时截断，避免浏览器卡死。 */
         function limitGraph(data) {
             if (data.nodes.length <= MAX_SUBGRAPH_NODES) return data;
             const keep = new Set(data.nodes.slice(0, MAX_SUBGRAPH_NODES).map(n => n.id));
@@ -1351,6 +1358,7 @@
             };
         }
 
+        /** 转义 HTML 特殊字符，防止答案文本被当成标签。 */
         function escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -1360,6 +1368,7 @@
                 .replace(/'/g, '&#39;');
         }
 
+        /** 在答案里高亮当前子图出现过的实体名。 */
         function highlightEntities(text, nodes) {
             let html = escapeHtml(text);
             const labels = [...new Set((nodes || []).map(n => n.label || n.name).filter(Boolean))]
@@ -1382,6 +1391,7 @@
         const MARKDOWN_HEADING_RE = /^[ \t]{0,3}#{1,6}[ \t]+/gm;
         const MARKDOWN_RULE_RE = /^[ \t]{0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$/gm;
 
+        /** 去掉答案里轻量 Markdown 标记，便于纯文本展示。 */
         function stripMarkdownLite(text) {
             return String(text ?? '')
                 .replace(MARKDOWN_HEADING_RE, '')
@@ -1395,6 +1405,7 @@
            保留——宁可多显示两个星号，也不能把内容吃掉。整个规范化都在
            escapeHtml 之前完成（纯字符串处理，不产出 HTML），模型文本因此仍然
            不会未经转义进入 innerHTML。 */
+        /** 规整答案空白与换行。 */
         function normalizeAnswerText(text) {
             return stripMarkdownLite(text).replace(/\*\*([^*\n]+)\*\*/g, '$1');
         }
@@ -1402,6 +1413,7 @@
         /* 高风险回答按后端给的分块渲染：样式由 kind 决定，不靠查字符串。
            没有分块时（普通回答）走原来的整体渲染，行为不变。
            程序核验说明单独成块，位于全部结论与原文之后。 */
+        /** 把接口答案渲染成聊天气泡 HTML。 */
         function renderAnswerBody(data, nodes) {
             const blocks = data.answer_blocks || [];
             if (!blocks.length) {
@@ -1422,6 +1434,7 @@
             return body + note;
         }
 
+        /** 把来源记录格式化成「第 x 页」。 */
         function pageLabel(source) {
             if (source.page_start == null) return '页码未标注';
             return source.page_start === source.page_end
@@ -1429,6 +1442,7 @@
                 : `第 ${source.page_start}-${source.page_end} 页`;
         }
 
+        /** 渲染页码、Chunk 与子图规模等溯源信息。 */
         function renderProvenance(data, subgraph) {
             const sources = data.sources || [];
             const nodes = subgraph.nodes || [];
@@ -1516,6 +1530,7 @@
             'verification_unavailable': 'folded'
         };
 
+        /** 渲染剂量/禁忌等核验块；普通问题返回空字符串。 */
         function renderHighRiskBlock(data) {
             const hr = data.high_risk;
             if (!hr || !hr.is_high_risk) return '';
@@ -1616,11 +1631,13 @@
             `;
         }
 
+        /** 用户首次提问后收起欢迎语。 */
         function hideWelcome() {
             const welcome = document.getElementById('chat-welcome');
             if (welcome) welcome.remove();
         }
 
+        /** 在对话区追加一条用户或系统消息。 */
         function appendMessage(role, html) {
             hideWelcome();
             const thread = document.getElementById('chat-thread');
@@ -1632,6 +1649,7 @@
             return wrap;
         }
 
+        /** 初始化 D3 力导向图画布、箭头和缩放。 */
         function initGraph() {
             svg = d3.select('#graph');
             const container = document.getElementById('graph-container');
@@ -1681,6 +1699,7 @@
             });
         }
 
+        /** 窗口变化时重算画布中心。 */
         function resizeGraph() {
             if (!svg || !simulation) return;
             const container = document.getElementById('graph-container');
@@ -1691,6 +1710,7 @@
             simulation.alpha(0.25).restart();
         }
 
+        /** 鼠标悬停节点时显示名称与类型。 */
         function showTooltip(event, d) {
             const tip = document.getElementById('graph-tooltip');
             const container = document.getElementById('graph-container');
@@ -1703,10 +1723,12 @@
             tip.style.top = `${Math.min(y, rect.height - 80)}px`;
         }
 
+        /** 隐藏节点悬浮提示。 */
         function hideTooltip() {
             document.getElementById('graph-tooltip').classList.remove('visible');
         }
 
+        /** 点击节点后在侧栏列出相邻关系。 */
         function showNodeDetails(d) {
             const panel = document.getElementById('details-panel');
             const related = graphData.edges
@@ -1737,6 +1759,7 @@
             });
         }
 
+        /** 用新的 subgraph 重绘力导向图。 */
         function updateGraph(data) {
             const prepared = limitGraph(cloneGraphPayload(data || { nodes: [], edges: [] }));
             graphData = prepared;
@@ -1811,6 +1834,7 @@
             updateLegend(prepared.nodes);
         }
 
+        /** 按当前子图类型更新图例。 */
         function updateLegend(nodes) {
             const typeCounts = {};
             nodes.forEach(nodeItem => {
@@ -1832,6 +1856,7 @@
             });
         }
 
+        /** 用 /api/stats 的类型计数更新图例。 */
         function updateLegendFromStats(nodesByType) {
             const legend = document.getElementById('legend');
             legend.innerHTML = '';
@@ -1849,6 +1874,7 @@
                 });
         }
 
+        /** 开始拖拽节点。 */
         function dragStarted(event, d) {
             nodeDragged = false;
             if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -1856,18 +1882,21 @@
             d.fy = d.y;
         }
 
+        /** 拖拽过程中固定节点位置。 */
         function dragged(event, d) {
             nodeDragged = true;
             d.fx = event.x;
             d.fy = event.y;
         }
 
+        /** 结束拖拽并释放节点。 */
         function dragEnded(event, d) {
             if (!event.active) simulation.alphaTarget(0);
             d.fx = null;
             d.fy = null;
         }
 
+        /** 调用 /api/health，检查 Flask 能否连上 Neo4j。 */
         async function checkHealth() {
             try {
                 const response = await fetch(`${API_BASE}/health`);
@@ -1880,6 +1909,7 @@
             }
         }
 
+        /** 调用 /api/stats，显示节点/边数量。 */
         async function loadStats() {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('loading').textContent = '加载图谱统计...';
@@ -1902,6 +1932,7 @@
             }
         }
 
+        // 提问：POST /api/graphrag，再渲染答案、高风险块与子图。
         document.getElementById('ask-button').addEventListener('click', async () => {
             const question = document.getElementById('question-input').value.trim();
             const method = document.getElementById('retrieval-method').value;

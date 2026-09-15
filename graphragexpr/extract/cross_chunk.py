@@ -69,6 +69,7 @@ def build_groups(
     seen: set[tuple[str, tuple[str, ...]]] = set()
 
     def _emit(anchor: str, members: Iterable[ChunkRecord], strategy: PairingStrategy) -> None:
+        """把当前分组候选输出到跨块补全结果。"""
         ordered = sorted(members, key=lambda c: (c.order_in_entry or 0, c.chunk_id))
         ids = tuple(c.chunk_id for c in ordered)
         if len(ids) < 2:

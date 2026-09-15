@@ -1,3 +1,5 @@
+"""测试 120 题检索评测集的字段与分布。"""
+
 from __future__ import annotations
 
 import json
@@ -8,6 +10,7 @@ DATASET = Path(__file__).parents[2] / "eval" / "retrieval" / "questions.jsonl"
 
 
 def _load_rows() -> list[dict]:
+    """加载评测 JSONL 行。"""
     return [
         json.loads(line)
         for line in DATASET.read_text(encoding="utf-8").splitlines()
@@ -16,6 +19,7 @@ def _load_rows() -> list[dict]:
 
 
 def test_retrieval_eval_set_has_required_distribution():
+    """测试：retrieval评测集合具有必需分布。"""
     rows = _load_rows()
 
     assert len(rows) >= 120
@@ -31,6 +35,7 @@ def test_retrieval_eval_set_has_required_distribution():
 
 
 def test_retrieval_eval_rows_keep_gold_and_safety_contracts():
+    """测试：retrieval评测行保留金标且安全/拒答契约。"""
     required = {
         "id",
         "split",
@@ -56,6 +61,7 @@ def test_retrieval_eval_rows_keep_gold_and_safety_contracts():
 
 
 def test_dataset_readme_documents_annotation_status():
+    """测试：数据集说明文档记载标注状态。"""
     readme = DATASET.with_name("README.md").read_text(encoding="utf-8")
 
     assert "人工仲裁" in readme
@@ -63,6 +69,7 @@ def test_dataset_readme_documents_annotation_status():
 
 
 def test_human_adjudication_and_result_gold_are_complete():
+    """测试：人工仲裁且结果金标完整。"""
     rows = _load_rows()
 
     assert sum(bool(row["gold_pages"] and row["gold_chunk_ids"]) for row in rows) == 118

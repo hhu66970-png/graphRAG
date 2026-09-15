@@ -38,6 +38,7 @@ _CLASS_ENTRY = re.compile(r"'([a-z_]+)'\s*:\s*'([a-z\-]+)'")
 
 
 def _frontend_status_classes() -> dict[str, str]:
+    """前端高风险状态对应的样式类。"""
     source = FRONTEND.read_text(encoding="utf-8")
     block = _CLASS_BLOCK.search(source)
     assert block, "frontend/index.html 里找不到 HR_STATUS_CLASS，徽标回归无从进行"
@@ -107,6 +108,7 @@ def ask(client, question: str) -> dict:
 
 
 def claims_of(data: dict) -> list[dict]:
+    """从回答中取出候选结论。"""
     return data.get("claims") or []
 
 

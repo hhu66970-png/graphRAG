@@ -41,6 +41,7 @@ from .conftest import assertion_row, dosage_row
 
 
 def dosage_units(text: str, assertion_id: str = "a-dose") -> list[ConditionalEvidenceUnit]:
+    """测试用：剂量证据单元。"""
     return build_units_from_assertions([dosage_row(assertion_id, text)])
 
 
@@ -52,6 +53,7 @@ def restriction_units(
     object_name: str,
     assertion_id: str = "a-restriction",
 ) -> list[ConditionalEvidenceUnit]:
+    """测试用：使用限制证据单元。"""
     return build_units_from_assertions(
         [
             assertion_row(
@@ -84,6 +86,7 @@ def grounded_dosage_claim(claim_id: str, unit_id: str, **overrides) -> Candidate
 
 
 def rejections_for(outcome, claim_id: str) -> list[dict]:
+    """收集核验拒绝项。"""
     return [item for item in outcome.rejections if item["claim_id"] == claim_id]
 
 
@@ -395,6 +398,7 @@ def test_unclear_unit_cannot_support_a_definitive_claim():
 
 # ---------------------------------------------------------------- 核验：结果一致性
 def test_accepted_rejected_and_rejections_stay_consistent():
+    """测试：通过被拒绝且拒绝项保持一致。"""
     units = dosage_units("煎服，3～9g。")
     good = grounded_dosage_claim("c-good", units[0].unit_id)
     bad = grounded_dosage_claim("c-bad", "unit:not-cited", cited_unit_ids=[])

@@ -53,6 +53,7 @@ DOSAGE_PAGE = 82
 
 
 def dosage_rows() -> list[dict]:
+    """测试夹具：构造剂量断言行。"""
     return [dosage_row("a-dosage", "煎服，3～9g。", quote=DOSAGE_QUOTE)]
 
 
@@ -130,12 +131,14 @@ class ApiFakeStore(FakeHighRiskStore):
         active_run_id: str | None = "run-test",
         linked_rows: list[dict] | None = None,
     ) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         super().__init__(rows)
         self.active_run_id = active_run_id
         self.linked_rows = list(linked_rows or [])
         self.closed = 0
 
     def run(self, cypher: str, **params):
+        """测试替身：执行一条 Cypher 并返回假结果。"""
         if "IngestRun" in cypher:
             self.calls.append({"cypher": cypher, **params})
             return [{"run_id": self.active_run_id}] if self.active_run_id else []
@@ -149,6 +152,7 @@ class ApiFakeStore(FakeHighRiskStore):
         return super().run(cypher, **params)
 
     def close(self) -> None:
+        """关闭底层 Driver 连接池。"""
         self.closed += 1
 
 
@@ -160,6 +164,7 @@ class NormalLLM:
     """
 
     def __init__(self, *, text: str = FREE_TEXT, error: Exception | None = None) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.text = text
         self.error = error
         self.constructed = 0
@@ -167,19 +172,24 @@ class NormalLLM:
 
     @property
     def calls(self) -> int:
+        """记录 Fake 客户端被调用的次数。"""
         return len(self.prompts)
 
     def as_client_factory(self):
+        """返回可注入 API 的假 LLM 工厂。"""
         owner = self
 
         class _FakeOpenAI:
+            """_FakeOpenAI：测试替身，用来隔离真实 Neo4j 或 LLM。"""
             def __init__(self, *args, **kwargs):
+                """初始化该对象，保存后续调用所需的配置或依赖。"""
                 owner.constructed += 1
                 self.chat = SimpleNamespace(
                     completions=SimpleNamespace(create=self._create)
                 )
 
             def _create(self, **kwargs):
+                """为无法链接的表面名新建实体记录。"""
                 owner.prompts.append(
                     "\n".join(
                         str(message.get("content", ""))
@@ -211,6 +221,7 @@ def forbid_high_risk(api_module, monkeypatch):
     """把高风险入口变成断言失败：用于「非高风险请求不得进入高风险链路」。"""
 
     def _boom(*args, **kwargs):
+        """测试用：故意抛出异常。"""
         raise AssertionError("非高风险问题不得进入高风险链路")
 
     monkeypatch.setattr(api_module, "_high_risk_response", _boom)
@@ -222,6 +233,7 @@ def forbid_normal_llm(api_module, monkeypatch):
     """把普通生成入口变成断言失败：用于「高风险问题不得跑普通生成」。"""
 
     def _boom(*args, **kwargs):
+        """测试用：故意抛出异常。"""
         raise AssertionError("高风险问题不得执行普通自由文本生成")
 
     monkeypatch.setattr(api_module, "OpenAI", _boom)
@@ -252,6 +264,7 @@ def wire(api_module, monkeypatch):
         linked_rows=None,
         active_run_id: str | None = "run-test",
     ):
+        """把假依赖接到被测 Flask 应用。"""
         llm = llm or NormalLLM()
         store = ApiFakeStore(
             rows if rows is not None else dosage_rows(),
@@ -283,6 +296,7 @@ def wire(api_module, monkeypatch):
         embedder_calls: list[str] = []
 
         def fake_retrieve_auto(question):
+            """测试用：假的自动路由检索。"""
             auto_calls.append({"question": question})
             if auto_error is not None:
                 raise auto_error
@@ -312,6 +326,7 @@ def wire(api_module, monkeypatch):
             )
 
         def fake_retrieve_native(question, **kwargs):
+            """测试用：假的原生驱动检索。"""
             native_calls.append({"question": question, **kwargs})
             return (
                 native_chunks,
@@ -321,6 +336,7 @@ def wire(api_module, monkeypatch):
             )
 
         def forbid_embedder():
+            """测试用：禁止误触发本地嵌入模型加载。"""
             embedder_calls.append("called")
             raise AssertionError(
                 "本用例不应触发嵌入器：模型仓库探测属于环境失败，"
@@ -328,6 +344,7 @@ def wire(api_module, monkeypatch):
             )
 
         def recording_link(question):
+            """测试用：记录实体链接调用。"""
             link_calls.append(question)
             return store.active_run_id, [
                 {

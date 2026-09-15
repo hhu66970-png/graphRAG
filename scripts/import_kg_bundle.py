@@ -19,6 +19,7 @@ SAFE_NAME = re.compile(r"^[\w\u4e00-\u9fff]+$", re.UNICODE)
 
 
 def _driver():
+    """按环境变量创建 Neo4j Driver。"""
     load_dotenv(ROOT / ".env")
     url = os.getenv("NEO4J_URL")
     user = os.getenv("NEO4J_USER")
@@ -29,6 +30,7 @@ def _driver():
 
 
 def _read_jsonl(archive: zipfile.ZipFile, name: str):
+    """按行读取 JSONL 评测题或预测。"""
     with archive.open(name, "r") as handle:
         for raw in handle:
             line = raw.decode("utf-8").strip()
@@ -37,6 +39,7 @@ def _read_jsonl(archive: zipfile.ZipFile, name: str):
 
 
 def _safe_token(value: str, fallback: str) -> str:
+    """清洗导入用的标识，避免 Cypher 注入式拼接。"""
     value = (value or "").strip() or fallback
     if not SAFE_NAME.match(value):
         cleaned = re.sub(r"[^\w\u4e00-\u9fff]+", "_", value, flags=re.UNICODE).strip("_")
@@ -45,6 +48,7 @@ def _safe_token(value: str, fallback: str) -> str:
 
 
 def import_bundle(bundle: Path, *, clear: bool) -> None:
+    """从 zip 导入节点、关系并重建索引。"""
     bundle = bundle.expanduser().resolve()
     if not bundle.is_file():
         raise FileNotFoundError(bundle)
@@ -163,6 +167,7 @@ def import_bundle(bundle: Path, *, clear: bool) -> None:
 
 
 def main() -> int:
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     parser = argparse.ArgumentParser(description="Import GraphRAG Neo4j bundle")
     parser.add_argument(
         "--bundle",

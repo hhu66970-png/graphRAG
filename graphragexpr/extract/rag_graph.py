@@ -1,3 +1,5 @@
+"""老师基线 GraphRAG 检索脚本，依赖 neo4j_graphrag，仅作对照。"""
+
 # rag_graph.py
 import os
 import sys

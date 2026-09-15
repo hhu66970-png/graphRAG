@@ -206,6 +206,7 @@ class CardSlot:
 
 @dataclass
 class HerbCard:
+    """HerbCard：本文件定义的数据结构或组件。"""
     canonical_id: str
     name: str
     aliases: list[str]
@@ -213,10 +214,12 @@ class HerbCard:
     subgraph: dict
 
     def is_empty(self) -> bool:
+        """属性卡片是否没有任何槽位。"""
         return not self.slots
 
 
 def active_run(store: Neo4jStore) -> str | None:
+    """Serving 读取时使用的活跃 run_id。"""
     return get_active_run(store)
 
 
@@ -385,6 +388,7 @@ def find_herbs_by_effect(
 
 
 def _name_covers_constraint(target_name: str, constraint_name: str) -> bool:
+    """判断实体名是否覆盖交集约束词。"""
     if not target_name or not constraint_name:
         return False
     return constraint_name in target_name or target_name in constraint_name

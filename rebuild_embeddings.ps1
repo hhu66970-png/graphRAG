@@ -1,4 +1,5 @@
-﻿# Rebuild semantic vectors for existing Neo4j Chunk nodes without calling the LLM.
+﻿# rebuild_embeddings.ps1
+# 按当前嵌入模型重写已有 Chunk 向量，不调用抽取 LLM。
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Rebuilding Local Chinese Embeddings" -ForegroundColor Cyan

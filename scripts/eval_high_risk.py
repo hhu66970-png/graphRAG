@@ -29,6 +29,7 @@ from graphragexpr.evaluation.high_risk_eval import (  # noqa: E402
 
 def main() -> int:
     # 连接串只从 .env（已被忽略，不入库）或既有环境变量读取，脚本不回显任何密钥。
+    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)

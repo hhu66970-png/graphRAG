@@ -116,17 +116,21 @@ class VerificationOutcome:
 
     @property
     def accepted(self) -> list[ClaimVerdict]:
+        """核验通过的结论列表。"""
         return [verdict for verdict in self.verdicts if verdict.passed]
 
     @property
     def rejected(self) -> list[ClaimVerdict]:
+        """核验失败的结论列表。"""
         return [verdict for verdict in self.verdicts if not verdict.passed]
 
     def has_any_pass(self) -> bool:
+        """是否至少有一条结论核验通过。"""
         return bool(self.accepted)
 
 
 def _unit_numbers(unit: ConditionalEvidenceUnit) -> set[float]:
+    """抽出证据单元中的剂量数字。"""
     if unit.dosage is None or not unit.dosage.has_numeric_value():
         return set()
     return {float(unit.dosage.value_min), float(unit.dosage.value_max)}

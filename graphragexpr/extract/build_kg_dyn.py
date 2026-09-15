@@ -53,17 +53,20 @@ RELATION_RE = re.compile(r"[^\w\u4e00-\u9fff]", re.UNICODE)
 
 
 def normalize_entity_type(value: str) -> str:
+    """旧管线：把实体类型规范到白名单，未知会降为「概念」。"""
     value = TYPE_ALIASES.get((value or "").strip(), (value or "").strip())
     return value if value in ENTITY_TYPES else "概念"
 
 
 def normalize_relationship_type(value: str) -> str:
+    """旧管线：清洗关系名以便写入 Cypher。"""
     cleaned = RELATION_RE.sub("_", (value or "相关").strip()).strip("_")
     cleaned = re.sub(r"_+", "_", cleaned)
     return cleaned[:40] or "相关"
 
 
 def parse_json_response(text: str) -> dict:
+    """从 LLM 回复中抽出 JSON 对象。"""
     text = text.strip()
     if "```json" in text:
         text = text.split("```json", 1)[1].split("```", 1)[0]
@@ -84,6 +87,7 @@ def parse_json_response(text: str) -> dict:
 
 
 def extraction_prompt(record: ChunkRecord) -> str:
+    """拼出旧管线的抽取提示词。"""
     return f"""你是中药学知识图谱抽取专家。请严格根据给定教材片段抽取实体和关系，不补充片段外知识。
 
 实体类型只允许：中药、功效、主治、性味、归经、用法用量、禁忌、配伍、药材来源、炮制、化学成分、方剂、典籍、人物、概念。
@@ -102,6 +106,7 @@ def extraction_prompt(record: ChunkRecord) -> str:
 
 
 def _cache_path(record: ChunkRecord) -> Path:
+    """返回该文本块抽取结果的本地缓存路径。"""
     digest = hashlib.sha256(record.text.encode("utf-8")).hexdigest()[:20]
     path = ROOT / ".cache" / "extractions" / f"{digest}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +114,7 @@ def _cache_path(record: ChunkRecord) -> Path:
 
 
 def extract_record(record: ChunkRecord, client: OpenAI, model: str) -> dict:
+    """对单个文本块调用 LLM 抽取实体关系。"""
     cache_path = _cache_path(record)
     if cache_path.exists():
         return json.loads(cache_path.read_text(encoding="utf-8"))
@@ -149,6 +155,7 @@ def extract_record(record: ChunkRecord, client: OpenAI, model: str) -> dict:
 
 
 def _required_environment() -> tuple[str, str, str, str, str]:
+    """检查旧建图所需的 Neo4j 与 LLM 环境变量。"""
     values = {
         "NEO4J_URL": os.getenv("NEO4J_URL", ""),
         "NEO4J_USER": os.getenv("NEO4J_USER", ""),
@@ -163,6 +170,7 @@ def _required_environment() -> tuple[str, str, str, str, str]:
 
 
 def write_graph(driver, records: list[ChunkRecord], extractions: list[dict]) -> None:
+    """把旧管线抽取结果按名称写入 Neo4j。"""
     dimension = int(os.getenv("EMBED_DIM", "1536"))
     embedder = ExternalEmbedder(dimension=dimension)
     clear_database = os.getenv("CLEAR_DATABASE", "true").lower() in {"1", "true", "yes"}
@@ -225,6 +233,7 @@ def write_graph(driver, records: list[ChunkRecord], extractions: list[dict]) -> 
 
 
 def build_knowledge_graph() -> None:
+    """旧管线入口：分块抽取并全量写图。"""
     neo4j_url, neo4j_user, neo4j_password, llm_token, llm_model = _required_environment()
     records = records_from_environment()
     if not records:

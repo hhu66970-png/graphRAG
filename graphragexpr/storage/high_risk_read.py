@@ -147,6 +147,7 @@ RETURN chunk.chunk_id     AS chunk_id,
 
 
 def _decode_json_column(row: dict, column: str, target: str) -> dict:
+    """把 Neo4j 中的 JSON 字符串列解码成对象。"""
     raw = row.pop(column, None)
     if raw is None:
         row[target] = {}

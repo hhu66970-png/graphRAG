@@ -52,10 +52,12 @@ class HerbReference:
     dosage_raw: str = ""
 
     def has_any(self) -> bool:
+        """判断参照对象是否含有任一取值。"""
         return bool(self.nature_flavor or self.meridians or self.efficacies or self.dosage_raw)
 
 
 def _clean(text: str) -> str:
+    """清洗教材字段文本以便对齐。"""
     return text.translate(_NOISE_CHARS).replace("\n", "").strip()
 
 

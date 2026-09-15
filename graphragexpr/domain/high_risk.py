@@ -131,6 +131,7 @@ class FieldSpan(_Base):
 
     @model_validator(mode="after")
     def _ordered(self) -> "FieldSpan":
+        """按固定顺序去重排列，保证词表输出稳定。"""
         if self.end < self.start:
             raise ValueError(f"字段跨度结束({self.end}) 小于开始({self.start})")
         return self
@@ -164,6 +165,7 @@ class DosageBinding(_Base):
     parse_notes: list[str] = Field(default_factory=list)
 
     def has_numeric_value(self) -> bool:
+        """判断文本里是否含有可核验的剂量数字。"""
         return self.value_min is not None and self.value_max is not None
 
     def is_bound_to_unit(self) -> bool:
@@ -236,6 +238,7 @@ class ConditionalEvidenceUnit(_Base):
 
     @model_validator(mode="after")
     def _consistency(self) -> "ConditionalEvidenceUnit":
+        """检查高风险相关字段是否自洽。"""
         if self.page_start is not None and self.page_end is not None:
             if self.page_end < self.page_start:
                 raise ValueError(

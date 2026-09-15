@@ -56,6 +56,7 @@ class HighRiskDataset:
 
     @property
     def summary(self) -> dict:
+        """汇总一组高风险评测分数。"""
         by_split: dict[str, int] = {}
         by_category: dict[str, int] = {}
         for item in self.items:
@@ -76,6 +77,7 @@ class HighRiskDataset:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
+    """按行读取 JSONL 评测题或预测。"""
     items: list[dict] = []
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
@@ -124,10 +126,12 @@ _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
 def _answer_text(payload: dict[str, Any]) -> str:
+    """从模型/系统输出中取出用于评分的答案文本。"""
     return str(payload.get("answer_text") or payload.get("answer") or "")
 
 
 def _cited_units(payload: dict[str, Any]) -> list[dict]:
+    """抽出回答里引用的证据单元。"""
     return list(payload.get("evidence_units") or [])
 
 
@@ -270,6 +274,7 @@ class ArmRunner:
     unit_token_budget: int | None = None
 
     def runner(self, arm: str) -> Callable[[dict], dict]:
+        """构造评测运行器。"""
         if arm == "conditional_units_verified":
             return self._arm_c
         if arm in ("raw_text_prompt", "raw_text_verified"):
@@ -278,6 +283,7 @@ class ArmRunner:
 
     # --- C：生产链路 -------------------------------------------------
     def _arm_c(self, item: dict) -> dict:
+        """跑高风险评测的核验臂（程序化校验）。"""
         from ..highrisk.service import HighRiskService, pack_answer_payload
         from ..storage.high_risk_read import load_high_risk_assertions
 
@@ -305,7 +311,9 @@ class ArmRunner:
 
     # --- A/B：原文 + 提示词 -------------------------------------------
     def _arm_a_or_b(self, *, verify: bool) -> Callable[[dict], dict]:
+        """跑高风险评测的对照臂（自由生成或仅提示）。"""
         def run(item: dict) -> dict:
+            """执行该评测臂或该条预测的一次完整跑批。"""
             if self.llm is None:
                 return {
                     "answer_status": "not_run",
@@ -436,6 +444,7 @@ def _run_raw_text_arm(
 
 
 def _link(store: Any, run_id: str | None, name: str) -> list[dict]:
+    """评测时把问题实体链接到图谱实体。"""
     from ..storage import serving_read
 
     return serving_read.link_entities_in_text(

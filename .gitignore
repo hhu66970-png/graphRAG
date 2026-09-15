@@ -13,8 +13,7 @@ origdata/*
 origdata/.ocr-pages/
 neo4j_data/
 dist/*.zip
-!dist/README.md
-graphragexpr/vis/output/
+*.zip
 **/*.doc
 **/*.docx
 *.pdf

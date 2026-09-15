@@ -1,5 +1,5 @@
 # import_kg_bundle.ps1
-# Import dist/zhongyaoxue-kg-bundle.zip into the configured Neo4j database.
+# 把离线 zip 导入本机 Neo4j，免 OCR、免重新抽取全书。
 
 param(
     [string]$Bundle = "dist\zhongyaoxue-kg-bundle.zip",

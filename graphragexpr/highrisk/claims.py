@@ -33,6 +33,7 @@ class ClaimKind(str, Enum):
 
 
 class _Base(BaseModel):
+    """_Base：本模块内部使用的数据结构。"""
     model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
 
 

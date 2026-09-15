@@ -34,11 +34,13 @@ class LLMUsage:
 
     @property
     def total_tokens(self) -> int:
+        """返回本客户端累计消耗的 token 数。"""
         return self.prompt_tokens + self.completion_tokens
 
 
 @dataclass
 class LLMFailure:
+    """LLMFailure：本文件定义的数据结构或组件。"""
     request_id: str
     purpose: str
     attempts: int
@@ -107,13 +109,16 @@ class LLMClient(Protocol):
 
     def complete_json(
         self, *, system: str, user: str, schema: type[BaseModel], purpose: str
-    ) -> BaseModel: ...
+    ) -> BaseModel:
+        """调用 LLM 并校验返回值为指定 JSON Schema。"""
+        ...
 
 
 class _BaseClient:
     """Shared retry / validation logic."""
 
     def __init__(self, settings: KGSettings) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._settings = settings
         self.usage = LLMUsage()
         self.failures: list[LLMFailure] = []
@@ -157,6 +162,7 @@ class _BaseClient:
             raise LLMContractError(f"[{request_id}] JSON 不满足 Schema: {exc}") from exc
 
     def _run_with_retry(self, call, *, purpose: str, schema, digest: str):
+        """带超时与指数退避地重试 LLM 调用。"""
         request_id = uuid.uuid4().hex[:12]
         last_error = ""
         for attempt in range(1, self._settings.llm_max_retries + 1):
@@ -191,6 +197,7 @@ class OpenAICompatibleClient(_BaseClient):
     """OpenAI-compatible chat completion provider (DeepSeek 等)."""
 
     def __init__(self, settings: KGSettings, *, client: Any | None = None) -> None:
+        """初始化该对象，保存后续调用所需的配置或依赖。"""
         super().__init__(settings)
         if client is not None:
             self._client = client
@@ -210,7 +217,9 @@ class OpenAICompatibleClient(_BaseClient):
     def complete_json(
         self, *, system: str, user: str, schema: type[BaseModel], purpose: str
     ) -> BaseModel:
+        """调用 LLM 并校验返回值为指定 JSON Schema。"""
         def _call() -> str:
+            """向兼容 OpenAI 的接口发送一次 chat completion。"""
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "system", "content": system},
@@ -237,6 +246,7 @@ class FakeLLMClient(_BaseClient):
     settings: KGSettings = field(default_factory=KGSettings)
 
     def __post_init__(self) -> None:
+        """数据类实例创建后做校验或补默认值。"""
         _BaseClient.__init__(self, self.settings)
         self._cursor: dict[str, int] = {}
         self.seen: list[tuple[str, str]] = []
@@ -244,6 +254,7 @@ class FakeLLMClient(_BaseClient):
     def complete_json(
         self, *, system: str, user: str, schema: type[BaseModel], purpose: str
     ) -> BaseModel:
+        """调用 LLM 并校验返回值为指定 JSON Schema。"""
         self.seen.append((purpose, user))
         queue = self.responses.get(purpose)
         if not queue:
