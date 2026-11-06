@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ..config.settings import DEFAULT_RETRIEVAL_SETTINGS, RetrievalSettings
+from ..config.settings import RetrievalSettings
 from ..domain.ontology import Ontology, load_ontology
 from .models import RetrievalPlan
 
@@ -131,13 +131,14 @@ def route_query(
     linked_entities: Sequence[dict],
     *,
     ontology: Ontology | None = None,
-    settings: RetrievalSettings = DEFAULT_RETRIEVAL_SETTINGS,
+    settings: RetrievalSettings | None = None,
 ) -> RetrievalPlan:
     """Route a normalized question without making an LLM call.
 
     Comparison and safety rules are evaluated before entity-count heuristics. The returned
     reason/confidence are trace information, not calibrated probabilities.
     """
+    settings = settings or RetrievalSettings()
     normalized = "".join(question.split())
     if not normalized:
         raise ValueError("question must not be blank")

@@ -1,8 +1,7 @@
 """存储层集成测试。
 
-安全约定：**绝不使用会 DETACH DELETE 全库的 fixture**。
-所有测试数据挂在一个独立的 document_id / run_id 下，结束时只删除自己创建的节点，
-现网演示图谱（11978 节点）不受影响。
+仅在显式配置并授权的 NEO4J_TEST_* 数据库中写入。
+发现业务批次时拒绝执行；结束时仅删除本模块的测试数据。
 """
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from dotenv import load_dotenv
 
 from graphragexpr.config.settings import KGSettings
 from graphragexpr.domain.ids import assertion_id, canonical_id, fact_key
@@ -35,18 +33,28 @@ SCHEMA_VERSION = "kg-ontology-1.0.0"
 
 @pytest.fixture(scope="module")
 def store():
-    """测试夹具：Neo4jStore。"""
-    load_dotenv()
-    if not all(os.getenv(n) for n in ("NEO4J_URL", "NEO4J_USER", "NEO4J_PASSWORD")):
-        pytest.skip("Neo4j 未配置")
-    handle = Neo4jStore()
+    """Only an explicitly configured disposable database may be mutated."""
+    if os.getenv("ALLOW_DESTRUCTIVE_TESTS", "").lower() not in {"true", "1", "yes"}:
+        pytest.skip("集成写入测试需显式设置 ALLOW_DESTRUCTIVE_TESTS=true")
+    values = {name: os.getenv("NEO4J_TEST_" + name) for name in ("URL", "USER", "PASSWORD", "DB")}
+    if not all(values.values()):
+        pytest.skip("请配置独立 NEO4J_TEST_URL/USER/PASSWORD/DB，不读取业务库配置")
+    handle = Neo4jStore(url=values["URL"], user=values["USER"],
+                        password=values["PASSWORD"], database=values["DB"])
     try:
         handle.verify()
-    except Exception as exc:  # noqa: BLE001 - 明确跳过而非静默吞掉
-        pytest.skip(f"Neo4j 不可用: {exc}")
-    yield handle
-    _cleanup(handle)
-    handle.close()
+        existing = handle.run(
+            "MATCH (n) WHERE NOT (n:GraphPublication AND n.name = 'serving') "
+            "AND NOT coalesce(n.run_id STARTS WITH 'itest-', false) "
+            "AND NOT coalesce(n.document_id = $doc, false) RETURN count(n) AS n",
+            doc=TEST_DOC,
+        )[0]["n"]
+        if existing:
+            pytest.skip("目标库包含非测试数据，拒绝写入或切换 ACTIVE")
+        yield handle
+        _cleanup(handle)
+    finally:
+        handle.close()
 
 
 def _cleanup(store: Neo4jStore) -> None:
@@ -74,27 +82,11 @@ def clean_test_scope(store):
 
 @pytest.fixture
 def isolated_active_run(store):
-    """Temporarily park the real ACTIVE run so run-lifecycle tests can assume isolation.
-
-    `activate()` 的语义是「全局只允许一个 ACTIVE」，因此它会降级**任何**其他 ACTIVE run，
-    包括线上正在服务的那个。仅按 run_id 前缀清理节点不足以隔离这个全局不变量，
-    必须在测试前后显式摘挂现网 run，否则跑一次测试就会让线上失去 ACTIVE。
-    """
+    """Refuse any non-test ACTIVE run instead of temporarily disabling it."""
     previous = run_store.get_active_run(store)
-    if previous:
-        store.run(
-            "MATCH (r:IngestRun {run_id: $id}) SET r.status = 'SUPERSEDED'", id=previous
-        )
+    if previous and not previous.startswith("itest-"):
+        pytest.fail("测试库出现业务 ACTIVE 批次；拒绝改变其状态")
     yield previous
-    # 先把测试造出来的 ACTIVE 全部降级，再恢复现网 run
-    store.run(
-        "MATCH (r:IngestRun) WHERE r.run_id STARTS WITH 'itest-' AND r.status = 'ACTIVE' "
-        "SET r.status = 'SUPERSEDED'"
-    )
-    if previous:
-        store.run(
-            "MATCH (r:IngestRun {run_id: $id}) SET r.status = 'ACTIVE'", id=previous
-        )
 
 
 def _seed(store: Neo4jStore, run_id: str) -> dict:
@@ -155,7 +147,7 @@ def _make_assertion(run_id: str, chunk_ids: list[str], **kwargs) -> AssertionRec
 
 class TestSchema:
     def test_required_constraints_exist(self, store):
-        """五个唯一约束必须存在，且名称类不得有唯一约束。"""
+        """所需约束必须存在，业务实体不得使用名称作为唯一键。"""
         ensure_schema(store, embedding_dim=512, rebuild_fulltext=False)
         rows = store.run("SHOW CONSTRAINTS YIELD name, labelsOrTypes, properties "
                          "RETURN name, labelsOrTypes, properties")
@@ -164,8 +156,12 @@ class TestSchema:
             expected = statement.split("CONSTRAINT ")[1].split(" ")[0]
             assert expected in names, f"缺少约束 {expected}"
 
-        # 名称绝不能有唯一约束
+        ontology = load_ontology()
+        entity_labels = {"Entity", *ontology.entity_types, *ontology.legacy_entity_aliases}
+        entity_labels.update(spec["display"] for spec in ontology.entity_types.values())
         for row in rows:
+            if not entity_labels.intersection(row["labelsOrTypes"] or []):
+                continue
             props = row["properties"] or []
             assert "name" not in props and "preferred_name" not in props, (
                 f"约束 {row['name']} 把名称当成了身份，名称不应作为唯一键"
@@ -396,3 +392,176 @@ class TestAssertionsAndProjection:
         assert report["total_assertions"] == 2
         assert report["accepted"] == 1 and report["review"] == 1
         assert report["evidence_coverage"] == 1.0
+
+
+def _shared_fact(run_id: str, chunk_id: str, *, score: float = 1.0) -> AssertionRecord:
+    return _make_assertion(
+        run_id, [chunk_id], subject_id=canonical_id("HERB", f"{E}甲"),
+        predicate="ENTERS_MERIDIAN", object_id=canonical_id("MERIDIAN", f"{E}经"),
+        evidence_quote="归脾、肺、心、肾经", evidence_start=18, evidence_end=27,
+        match_mode="raw_exact", page_start=132, page_end=132,
+        rule_score=score, final_score=score, validation_status="ACCEPTED",
+    )
+
+
+def _facts_for_run(store, run_id):
+    return store.run(
+        "MATCH (a:Assertion {run_id: $run}) RETURN a.assertion_id AS id, "
+        "a.evidence_quote AS quote, a.final_score AS score ORDER BY id", run=run_id,
+    )
+
+
+def _edges_for_run(store, run_id):
+    return store.run(
+        "MATCH ()-[e]->() WHERE e.active_run_id = $run AND e.fact_key IS NOT NULL "
+        "RETURN e.fact_key AS key, e.evidence_ids AS evidence, e.best_support_score AS score "
+        "ORDER BY key", run=run_id,
+    )
+
+
+def test_repeated_build_preserves_serving_data_through_failure_and_rollback(
+    store, clean_test_scope, isolated_active_run
+):
+    from graphragexpr.storage.serving_read import find_herb
+
+    old = "itest-version-old"
+    seed = _seed(store, old)
+    chunk = seed["chunks"][0].chunk_id
+    assertion_store.upsert_assertions(store, [_shared_fact(old, chunk)], batch_size=10)
+    serving_projection.rebuild_projection(store, load_ontology(), run_id=old, batch_size=10)
+    run_store.activate(store, old, quality_report={})
+    old_facts, old_edges = _facts_for_run(store, old), _edges_for_run(store, old)
+
+    for new, publish in (("itest-version-failed", False), ("itest-version-published", True)):
+        store.run("CREATE (:IngestRun {run_id: $run, status: 'BUILDING'})", run=new)
+        assertion_store.upsert_entities(store, seed["entities"], run_id=new, batch_size=10)
+        assertion_store.upsert_assertions(store, [_shared_fact(new, chunk, score=0.9)], batch_size=10)
+        serving_projection.rebuild_projection(store, load_ontology(), run_id=new, batch_size=10)
+        assert run_store.get_active_run(store) == old
+        assert _facts_for_run(store, old) == old_facts
+        assert _edges_for_run(store, old) == old_edges
+        assert _facts_for_run(store, new)[0]["id"] != old_facts[0]["id"]
+        assert find_herb(store, f"{E}甲", run_id=new)
+        assert find_herb(store, f"{E}甲", run_id=old)
+        if publish:
+            run_store.activate(store, new, quality_report={})
+            assert run_store.get_active_run(store) == new
+            assert _edges_for_run(store, new)[0]["score"] == 0.9
+            run_store.rollback_to(store, old)
+        else:
+            run_store.mark_failed(store, new, "test quality failure")
+        assert run_store.get_active_run(store) == old
+        assert _facts_for_run(store, old) == old_facts
+        assert _edges_for_run(store, old) == old_edges
+
+
+def test_existing_legacy_assertion_and_projection_survive_new_build(store, clean_test_scope):
+    old, new = "itest-legacy-old", "itest-legacy-new"
+    seed = _seed(store, old)
+    record = _shared_fact(old, seed["chunks"][0].chunk_id)
+    assertion_store.upsert_assertions(store, [record], batch_size=10)
+    # Emulate the pre-versioning on-disk format without changing its historical evidence IDs.
+    store.run("MATCH (a:Assertion {run_id: $run}) SET a.assertion_id = $id REMOVE a.source_assertion_id",
+              run=old, id=record.assertion_id)
+    serving_projection.rebuild_projection(store, load_ontology(), run_id=old, batch_size=10)
+    before = _edges_for_run(store, old)
+    store.run("CREATE (:IngestRun {run_id: $run, status: 'BUILDING'})", run=new)
+    assertion_store.upsert_entities(store, seed["entities"], run_id=new, batch_size=10)
+    assertion_store.upsert_assertions(store, [record.model_copy(update={"run_id": new})], batch_size=10)
+    serving_projection.rebuild_projection(store, load_ontology(), run_id=new, batch_size=10)
+    assert _facts_for_run(store, old)[0]["id"] == record.assertion_id
+    assert _edges_for_run(store, old) == before
+    memberships = store.run(
+        "MATCH (e:Entity {canonical_id: $id})-[:IN_RUN]->(r:IngestRun) "
+        "RETURN r.run_id AS run ORDER BY run", id=seed["entities"][0].canonical_id,
+    )
+    assert {r["run"] for r in memberships} == {old, new}
+
+
+def test_published_content_cannot_be_rewritten(store, clean_test_scope, isolated_active_run):
+    run = "itest-immutable"
+    seed = _seed(store, run)
+    record = _shared_fact(run, seed["chunks"][0].chunk_id)
+    assertion_store.upsert_assertions(store, [record], batch_size=10)
+    serving_projection.rebuild_projection(store, load_ontology(), run_id=run, batch_size=10)
+    run_store.activate(store, run, quality_report={})
+    before = _facts_for_run(store, run), _edges_for_run(store, run)
+    for action in (
+        lambda: assertion_store.upsert_assertions(store, [record], batch_size=10),
+        lambda: serving_projection.rebuild_projection(store, load_ontology(), run_id=run, batch_size=10),
+        lambda: run_store.mark_failed(store, run, "late exception"),
+    ):
+        with pytest.raises(run_store.RunStateError):
+            action()
+    assert (_facts_for_run(store, run), _edges_for_run(store, run)) == before
+    assert run_store.get_active_run(store) == run
+
+
+def test_rollback_restores_version_when_no_run_is_active(store, clean_test_scope):
+    store.run("CREATE (:IngestRun {run_id: 'itest-rollback', status: 'SUPERSEDED'})")
+    run_store.rollback_to(store, "itest-rollback")
+    assert run_store.get_active_run(store) == "itest-rollback"
+
+
+def test_concurrent_publications_leave_exactly_one_active(store, clean_test_scope, isolated_active_run):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    runs = ["itest-concurrent-a", "itest-concurrent-b"]
+    for run in runs:
+        store.run("CREATE (:IngestRun {run_id: $run, status: 'BUILDING'})", run=run)
+    barrier = Barrier(2)
+
+    def publish(run):
+        barrier.wait(timeout=10)
+        run_store.activate(store, run, quality_report={})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(publish, runs))
+    states = store.run("MATCH (r:IngestRun) WHERE r.run_id IN $ids RETURN r.status AS state", ids=runs)
+    assert sorted(row["state"] for row in states) == ["ACTIVE", "SUPERSEDED"]
+
+
+def test_failed_projection_rebuild_rolls_back_deletion(store, clean_test_scope):
+    from contextlib import contextmanager
+
+    run = "itest-projection-atomic"
+    seed = _seed(store, run)
+    assertion_store.upsert_assertions(store, [_shared_fact(run, seed["chunks"][0].chunk_id)], batch_size=10)
+    serving_projection.rebuild_projection(store, load_ontology(), run_id=run, batch_size=10)
+    before = _edges_for_run(store, run)
+
+    class FailingTransaction:
+        def __init__(self, tx):
+            self.tx = tx
+
+        def run(self, query, **params):
+            if "MERGE (s)-[e:" in query:
+                raise RuntimeError("projection write failed")
+            return self.tx.run(query, **params)
+
+    class FailingStore:
+        @contextmanager
+        def session(self):
+            with store.session() as real_session:
+                class Session:
+                    def execute_write(self, callback):
+                        return real_session.execute_write(lambda tx: callback(FailingTransaction(tx)))
+                yield Session()
+
+    with pytest.raises(RuntimeError, match="projection write failed"):
+        serving_projection.rebuild_projection(FailingStore(), load_ontology(), run_id=run, batch_size=10)
+    assert _edges_for_run(store, run) == before
+
+
+def test_alias_updates_are_scoped_to_the_new_build(store, clean_test_scope):
+    from graphragexpr.storage.serving_read import find_herb
+
+    old, new = "itest-alias-old", "itest-alias-new"
+    seed = _seed(store, old)
+    store.run("CREATE (:IngestRun {run_id: $run, status: 'BUILDING'})", run=new)
+    updated = seed["entities"][0].model_copy(update={"aliases": [f"{E}新别名"]})
+    assertion_store.upsert_entities(store, [updated], run_id=new, batch_size=10)
+    assert find_herb(store, f"{E}新别名", run_id=old) is None
+    assert find_herb(store, f"{E}新别名", run_id=new)["canonical_id"] == updated.canonical_id
+    assert find_herb(store, f"{E}甲", run_id=old)["canonical_id"] == updated.canonical_id

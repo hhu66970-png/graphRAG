@@ -15,6 +15,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from neo4j import GraphDatabase
 from openai import OpenAI
+from werkzeug.exceptions import RequestEntityTooLarge
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -27,10 +28,42 @@ for _stream in (sys.stdout, sys.stderr):
 sys.path.insert(0, str(PROJECT_ROOT / "graphragexpr"))
 from external_embedder import ExternalEmbedder
 
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+def _positive_env_int(name, default, *, maximum=None):
+    value = int(os.getenv(name) or default)
+    if value <= 0 or (maximum is not None and value > maximum):
+        raise ValueError(f"Invalid {name}: {value}")
+    return value
+
+
+def _server_options():
+    """Local defaults; external listening and debugging require explicit settings."""
+    return {
+        "host": (os.getenv("BACKEND_HOST") or "").strip() or "127.0.0.1",
+        "port": _positive_env_int("BACKEND_PORT", 5000, maximum=65535),
+        "debug": (os.getenv("BACKEND_DEBUG") or "false").strip().lower() in {"1", "true", "yes", "on"},
+        # Keep the process identity stable for the launcher health check.
+        "use_reloader": False,
+    }
+
+
+def _configure_http(application):
+    application.config["MAX_CONTENT_LENGTH"] = _positive_env_int(
+        "BACKEND_MAX_REQUEST_BYTES", 65536
+    )
+    origins = [origin.strip() for origin in (os.getenv("CORS_ORIGINS") or "").split(",") if origin.strip()]
+    if origins:
+        CORS(application, resources={r"/api/*": {"origins": origins}})
 
 app = Flask(__name__, static_folder="../frontend", static_url_path="")
-CORS(app)  # Enable CORS for frontend
+_configure_http(app)
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def request_too_large(_error):
+    return jsonify({"error": "Request body is too large"}), 413
 
 # Neo4j connection
 driver = GraphDatabase.driver(
@@ -636,7 +669,7 @@ def health_check():
     """Health check endpoint"""
     try:
         driver.verify_connectivity()
-        return jsonify({"status": "ok", "message": "Connected to Neo4j"}), 200
+        return jsonify({"status": "ok", "message": "Connected to Neo4j", "pid": os.getpid()}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -1392,14 +1425,19 @@ def _high_risk_response(question, method, *, auto_result=None):
 @app.route('/api/graphrag', methods=['POST'])
 def graphrag_query():
     """Perform GraphRAG query and return answer with subgraph used"""
-    data = request.get_json() or {}
+    if not request.is_json:
+        return jsonify({"error": "A JSON object is required"}), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
     question = data.get('question', '')
     method = data.get('method', 'auto')
 
-    if not question:
-        return jsonify({"error": "Question is required"}), 400
+    if not isinstance(question, str) or not question.strip():
+        return jsonify({"error": "Question is required and must be a non-empty string"}), 400
+    question = question.strip()
     # method 校验提前到最前面：未知 method 不再走完一次检索才报错。
-    if method not in _ALL_METHODS:
+    if not isinstance(method, str) or method not in _ALL_METHODS:
         return jsonify({"error": f"Unknown method: {method}"}), 400
 
     # **尽早**识别高风险：只执行所选 method 的检索部分，普通自由文本生成一步都
@@ -1473,9 +1511,10 @@ def _warmup_embedder():
 
 
 if __name__ == '__main__':
+    server_options = _server_options()
     print("Starting GraphRAG Backend API...")
     print(f"Neo4j URI: {os.getenv('NEO4J_URL')}")
-    print("API will be available at http://localhost:5000")
+    print(f"API will be available at http://{server_options['host']}:{server_options['port']}")
     import threading
     threading.Thread(target=_warmup_embedder, daemon=True).start()
     print("\nAvailable endpoints:")
@@ -1486,4 +1525,4 @@ if __name__ == '__main__':
     print("  GET  /api/stats           - Get graph statistics")
     print("  GET  /api/search?q=...    - Search entities")
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(**server_options)

@@ -34,16 +34,16 @@ Windows PowerShell：
 Copy-Item .env.example .env
 ```
 
-安装依赖并启动数据库：
+在 `.env` 中填写 `NEO4J_URL`、`NEO4J_USER`、`NEO4J_PASSWORD`、`LLM_ENDPOINT`、
+`LLM_MODEL` 和 `LLM_TOKEN`。设置自己的数据库密码，Compose 与应用共用该值。
+`EMBED_CACHE_DIR` 可留空；指定时使用绝对路径，不支持 `~` 展开。
+
+配置完成后安装依赖并启动数据库：
 
 ```bash
 python -m pip install -r requirements.txt
 docker compose up -d neo4j
 ```
-
-在 `.env` 中填写 `NEO4J_URL`、`NEO4J_USER`、`NEO4J_PASSWORD`、`LLM_ENDPOINT`、
-`LLM_MODEL` 和 `LLM_TOKEN`。示例数据库密码与 Compose 的本地配置一致。
-`EMBED_CACHE_DIR` 可留空；指定时使用绝对路径，不支持 `~` 展开。
 
 只使用外部嵌入接口时，可以安装 `requirements/base.txt`，并配置
 `EMBED_PROVIDER=external` 及 `EMBED_ENDPOINT`、`EMBED_MODEL`、`EMBED_TOKEN`。
@@ -157,9 +157,10 @@ python scripts/eval_high_risk.py --validate-only
 ```
 
 Windows 的 `.\run_tests.ps1` 运行同一组离线测试。
-数据库集成测试使用 `python -m pytest -m integration`，需配置专用 Neo4j 实例；
-旧管线测试还需完整的 `requirements.txt`。需要空库的测试默认跳过非空数据库，
-设置 `ALLOW_DESTRUCTIVE_TESTS=true` 会允许测试清库。
+数据库集成测试使用 `python -m pytest -m integration`，写入测试需显式配置独立的
+`NEO4J_TEST_URL`、`NEO4J_TEST_USER`、`NEO4J_TEST_PASSWORD`、`NEO4J_TEST_DB`，
+并设置 `ALLOW_DESTRUCTIVE_TESTS=true`；这会允许清空指定的测试库。写入测试不使用业务库的
+`NEO4J_*` 配置。旧管线测试还需完整的 `requirements.txt`。
 
 评测口径与历史结果见 [评测说明](docs/evaluation.md)。
 检索题集有 120 题；高风险题集有 14 题，仍待人工仲裁。

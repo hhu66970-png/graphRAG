@@ -169,14 +169,35 @@ def _required_environment() -> tuple[str, str, str, str, str]:
     return tuple(values[name] for name in values)  # type: ignore[return-value]
 
 
+def _clear_database_enabled() -> bool:
+    return (os.getenv("CLEAR_DATABASE") or "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ensure_legacy_write_allowed(session, *, clear: bool) -> None:
+    if clear:
+        return
+    row = session.run(
+        "RETURN EXISTS { MATCH (:IngestRun) } "
+        "OR EXISTS { MATCH (:Assertion) } "
+        "OR EXISTS { MATCH (c:Chunk) WHERE c.chunk_id IS NOT NULL } AS protected"
+    ).single()
+    if row is None or row["protected"]:
+        raise RuntimeError(
+            "目标库已有版本化图谱或稳定 Chunk，旧管线不能覆盖其原文、页码或向量。"
+            "请使用 scripts/build_kg_v2.py 重建事实，或将新语料写入独立数据库。"
+            "仅在确实需要删除目标库全部数据后重新初始化时，显式设置 CLEAR_DATABASE=true。"
+        )
+
+
 def write_graph(driver, records: list[ChunkRecord], extractions: list[dict]) -> None:
     """把旧管线抽取结果按名称写入 Neo4j。"""
     dimension = int(os.getenv("EMBED_DIM", "1536"))
-    embedder = ExternalEmbedder(dimension=dimension)
-    clear_database = os.getenv("CLEAR_DATABASE", "true").lower() in {"1", "true", "yes"}
+    clear_database = _clear_database_enabled()
     database = os.getenv("NEO4J_DB") or None
 
     with driver.session(database=database) as session:
+        _ensure_legacy_write_allowed(session, clear=clear_database)
+        embedder = ExternalEmbedder(dimension=dimension)
         if clear_database:
             print("清空当前 Neo4j 数据库...")
             session.run("MATCH (n) DETACH DELETE n").consume()
@@ -240,22 +261,25 @@ def build_knowledge_graph() -> None:
         raise RuntimeError("语料没有生成任何文本块")
     print(f"读取到 {len(records)} 个文本块。")
 
-    client = OpenAI(api_key=llm_token, base_url=os.getenv("LLM_ENDPOINT") or None)
-    extractions: list[dict] = []
-    for position, record in enumerate(records, start=1):
-        print(f"抽取实体关系 {position}/{len(records)}（PDF 页 {record.page_start}-{record.page_end}）...", flush=True)
-        try:
-            extractions.append(extract_record(record, client, llm_model))
-        except Exception as exc:
-            print(f"警告：Chunk {record.index} 抽取失败，将保留纯文本块：{exc}")
-            extractions.append({"entities": [], "relationships": []})
-
-    if not any(item["entities"] for item in extractions):
-        raise RuntimeError("所有实体抽取均失败；数据库未被修改。请检查 LLM 配置和接口响应。")
-
     driver = GraphDatabase.driver(neo4j_url, auth=(neo4j_user, neo4j_password))
     try:
         driver.verify_connectivity()
+        with driver.session(database=os.getenv("NEO4J_DB") or None) as session:
+            _ensure_legacy_write_allowed(session, clear=_clear_database_enabled())
+
+        client = OpenAI(api_key=llm_token, base_url=os.getenv("LLM_ENDPOINT") or None)
+        extractions: list[dict] = []
+        for position, record in enumerate(records, start=1):
+            print(f"抽取实体关系 {position}/{len(records)}（PDF 页 {record.page_start}-{record.page_end}）...", flush=True)
+            try:
+                extractions.append(extract_record(record, client, llm_model))
+            except Exception as exc:
+                print(f"警告：Chunk {record.index} 抽取失败，将保留纯文本块：{exc}")
+                extractions.append({"entities": [], "relationships": []})
+
+        if not any(item["entities"] for item in extractions):
+            raise RuntimeError("所有实体抽取均失败；数据库未被修改。请检查 LLM 配置和接口响应。")
+
         write_graph(driver, records, extractions)
         with driver.session(database=os.getenv("NEO4J_DB") or None) as session:
             nodes = session.run("MATCH (n) RETURN count(n) AS count").single()["count"]

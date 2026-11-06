@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from .neo4j_store import Neo4jStore
 
+PUBLICATION_LOCK_CONSTRAINT = (
+    "CREATE CONSTRAINT publication_name IF NOT EXISTS "
+    "FOR (p:GraphPublication) REQUIRE p.name IS UNIQUE"
+)
+
 CONSTRAINTS: tuple[str, ...] = (
+    PUBLICATION_LOCK_CONSTRAINT,
     "CREATE CONSTRAINT entity_canonical_id IF NOT EXISTS "
     "FOR (e:Entity) REQUIRE e.canonical_id IS UNIQUE",
     "CREATE CONSTRAINT chunk_chunk_id IF NOT EXISTS "

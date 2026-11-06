@@ -88,6 +88,13 @@ def assertion_id(fact: str, chunk: str, span: tuple[int | None, int | None], sch
     return _sha(fact, chunk, span[0], span[1], schema_version, length=24)
 
 
+def assertion_version_id(logical_id: str, run_id: str) -> str:
+    """Stable storage identity for one assertion in one immutable build."""
+    if not logical_id or not run_id:
+        raise ValueError("断言与批次 ID 不能为空")
+    return "av:" + _sha(run_id, logical_id, length=32)
+
+
 def new_run_id() -> str:
     """时间前缀 + 随机后缀，单调可排序。"""
     return f"{int(time.time() * 1000):013d}-{uuid.uuid4().hex[:12]}"

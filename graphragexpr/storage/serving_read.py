@@ -36,12 +36,16 @@ CARD_SLOT_ORDER: tuple[str, ...] = (
 
 _FIND_HERB = """
 MATCH (e:Entity {entity_type: 'HERB'})
-WHERE (e.preferred_name = $name OR $name IN coalesce(e.aliases, []))
+OPTIONAL MATCH (e)-[membership:IN_RUN]->(:IngestRun {run_id: $run})
+WITH e, membership
+WHERE (e.preferred_name = $name OR $name IN coalesce(membership.aliases, e.aliases, []))
   AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[:IN_RUN]->(:IngestRun {run_id: $run})
+  } OR EXISTS {
     MATCH (e)-[serving]-()
     WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
   })
-RETURN e.canonical_id AS canonical_id, e.preferred_name AS name, e.aliases AS aliases
+RETURN e.canonical_id AS canonical_id, e.preferred_name AS name, coalesce(membership.aliases, e.aliases, []) AS aliases
 LIMIT 1
 """
 
@@ -310,10 +314,14 @@ def get_herb_card(
 # 同为 2 字，会把真正的中药挤出 LIMIT。
 _LINK_IN_TEXT = """
 MATCH (e:Entity)
+OPTIONAL MATCH (e)-[membership:IN_RUN]->(:IngestRun {run_id: $run})
+WITH e, membership
 WHERE e.entity_type IN $types
-  AND any(surface IN [e.preferred_name] + coalesce(e.aliases, [])
+  AND any(surface IN [e.preferred_name] + coalesce(membership.aliases, e.aliases, [])
           WHERE surface IS NOT NULL AND size(surface) >= 2 AND $text CONTAINS surface)
   AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[:IN_RUN]->(:IngestRun {run_id: $run})
+  } OR EXISTS {
     MATCH (e)-[serving]-()
     WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
   })
@@ -327,12 +335,16 @@ LIMIT $limit
 
 _LONGER_ENTITY_IN_TEXT = """
 MATCH (e:Entity)
+OPTIONAL MATCH (e)-[membership:IN_RUN]->(:IngestRun {run_id: $run})
+WITH e, membership
 WHERE e.preferred_name IS NOT NULL
   AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[:IN_RUN]->(:IngestRun {run_id: $run})
+  } OR EXISTS {
     MATCH (e)-[serving]-()
     WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
   })
-  AND any(surface IN [e.preferred_name] + coalesce(e.aliases, [])
+  AND any(surface IN [e.preferred_name] + coalesce(membership.aliases, e.aliases, [])
           WHERE surface IS NOT NULL
             AND size(surface) > size($name)
             AND surface CONTAINS $name

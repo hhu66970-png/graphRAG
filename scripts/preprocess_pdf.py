@@ -7,19 +7,63 @@ does not call an online OCR service and never modifies the source PDF.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-import pymupdf
-from rapidocr_onnxruntime import RapidOCR
+if TYPE_CHECKING:
+    import pymupdf
+    from rapidocr_onnxruntime import RapidOCR
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from graphragexpr.cache import atomic_write_text  # noqa: E402
 
 
 PAGE_HEADER_RE = re.compile(r"^\s*\d{1,3}\s*(中药学|目录)\s*$")
 CHAPTER_RE = re.compile(r"^第[一二三四五六七八九十百零〇0-9]+章")
 SECTION_RE = re.compile(r"^第[一二三四五六七八九十百零〇0-9]+节")
 SUBSECTION_RE = re.compile(r"^[一二三四五六七八九十]+、")
+
+
+def _open_pdf(path: Path):
+    import pymupdf
+    return pymupdf.open(path)
+
+
+def _create_engine():
+    from rapidocr_onnxruntime import RapidOCR
+    return RapidOCR()
+
+
+def _backend_versions() -> dict[str, str]:
+    versions = {}
+    for package in ("PyMuPDF", "rapidocr-onnxruntime", "onnxruntime"):
+        try:
+            versions[package] = version(package)
+        except PackageNotFoundError:
+            versions[package] = "unavailable"
+    return versions
+
+
+def cache_fingerprint(pdf_path: Path, *, dpi: int, min_score: float) -> str:
+    digest = hashlib.sha256()
+    with pdf_path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    identity = {
+        "pipeline_version": 2,
+        "pdf_sha256": digest.hexdigest(),
+        "dpi": dpi,
+        "min_score": min_score,
+        "backend_versions": _backend_versions(),
+    }
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def normalize_line(text: str) -> str:
@@ -89,34 +133,41 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.dpi <= 0 or not 0 <= args.min_score <= 1:
+        parser.error("--dpi 必须为正整数，--min-score 必须在 0 到 1 之间")
     pdf_path = args.pdf.expanduser().resolve()
     output_path = args.output.expanduser().resolve()
     if not pdf_path.is_file():
         raise FileNotFoundError(f"PDF 不存在: {pdf_path}")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_dir = output_path.parent / ".ocr-pages"
+    cache_dir = output_path.parent / ".ocr-pages" / cache_fingerprint(
+        pdf_path, dpi=args.dpi, min_score=args.min_score
+    )
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    document = pymupdf.open(pdf_path)
-    end_page = args.end_page or document.page_count
-    if not (1 <= args.start_page <= end_page <= document.page_count):
-        raise ValueError(f"页码必须在 1..{document.page_count} 内，且起始页不大于结束页")
-
-    engine = RapidOCR()
     page_files: list[Path] = []
-    for page_number in range(args.start_page, end_page + 1):
-        page_file = cache_dir / f"page-{page_number:04d}.md"
-        page_files.append(page_file)
-        if page_file.exists() and not args.force:
-            print(f"[{page_number}/{end_page}] 使用缓存")
-            continue
+    with _open_pdf(pdf_path) as document:
+        end_page = args.end_page if args.end_page is not None else document.page_count
+        if not (1 <= args.start_page <= end_page <= document.page_count):
+            raise ValueError(f"页码必须在 1..{document.page_count} 内，且起始页不大于结束页")
 
-        print(f"[{page_number}/{end_page}] OCR...", flush=True)
-        lines = ocr_page(document[page_number - 1], engine, args.dpi, args.min_score)
-        body = "\n\n".join(lines).strip()
-        page_file.write_text(f"<!-- source-page: {page_number} -->\n\n{body}\n", encoding="utf-8")
+        engine = None
+        for page_number in range(args.start_page, end_page + 1):
+            page_file = cache_dir / f"page-{page_number:04d}.md"
+            page_files.append(page_file)
+            if page_file.exists() and not args.force:
+                print(f"[{page_number}/{end_page}] 使用缓存")
+                continue
+
+            if engine is None:
+                engine = _create_engine()
+            print(f"[{page_number}/{end_page}] OCR...", flush=True)
+            lines = ocr_page(document[page_number - 1], engine, args.dpi, args.min_score)
+            body = "\n\n".join(lines).strip()
+            atomic_write_text(page_file, f"<!-- source-page: {page_number} -->\n\n{body}\n")
 
     header = (
         "# 中药学（新世纪第五版）OCR 语料\n\n"
@@ -124,9 +175,7 @@ def main() -> int:
         f"> PDF 页码范围：{args.start_page}-{end_page}\n\n"
     )
     combined = header + "\n\n".join(path.read_text(encoding="utf-8").strip() for path in page_files) + "\n"
-    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    tmp_path.write_text(combined, encoding="utf-8")
-    tmp_path.replace(output_path)
+    atomic_write_text(output_path, combined)
     print(f"完成：{output_path}（{len(combined):,} 字符）")
     return 0
 

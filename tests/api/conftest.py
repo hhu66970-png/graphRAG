@@ -138,7 +138,7 @@ class ApiFakeStore(FakeHighRiskStore):
 
     def run(self, cypher: str, **params):
         """测试替身：执行一条 Cypher 并返回假结果。"""
-        if "IngestRun" in cypher:
+        if "MATCH (r:IngestRun" in cypher:
             self.calls.append({"cypher": cypher, **params})
             return [{"run_id": self.active_run_id}] if self.active_run_id else []
         # 先判「更长实体名」：它的条件与链接查询不重叠，但顺序固定下来更清楚。

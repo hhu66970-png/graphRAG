@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 
-from ..config.settings import DEFAULT_RETRIEVAL_SETTINGS, RetrievalSettings
+from ..config.settings import RetrievalSettings
 from ..domain.models import EvidenceItem, EvidencePacket
 from ..domain.ontology import Ontology
 from ..domain.high_risk import TASK_HIGH_RISK_PREDICATES
@@ -577,9 +577,10 @@ def retrieve(
     run_id: str | None = None,
     fallback_retriever: FallbackRetriever | None = None,
     token_budget: int | None = None,
-    settings: RetrievalSettings = DEFAULT_RETRIEVAL_SETTINGS,
+    settings: RetrievalSettings | None = None,
 ) -> RetrievalResult:
     """Link, route and retrieve one question without generating natural language."""
+    settings = settings or RetrievalSettings()
     active_run_id = run_id or serving_read.active_run(store)
     if not active_run_id:
         raise RuntimeError("没有 ACTIVE 的 IngestRun")

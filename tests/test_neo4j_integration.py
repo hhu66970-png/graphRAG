@@ -21,9 +21,9 @@ class TestNeo4jIntegration:
         driver = neo4j_driver
         driver.verify_connectivity()
 
-    def test_create_and_query_node(self, neo4j_driver, clean_database):
+    def test_create_and_query_node(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test creating and querying a node"""
-        with neo4j_driver.session() as session:
+        with neo4j_driver.session(database=neo4j_test_config["database"]) as session:
             # Create a node
             session.run(
                 "CREATE (n:TestNode {name: $name, value: $value})",
@@ -38,9 +38,9 @@ class TestNeo4jIntegration:
             record = result.single()
             assert record["value"] == 42
 
-    def test_create_relationship(self, neo4j_driver, clean_database):
+    def test_create_relationship(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test creating relationships between nodes"""
-        with neo4j_driver.session() as session:
+        with neo4j_driver.session(database=neo4j_test_config["database"]) as session:
             # Create two nodes with a relationship
             session.run("""
                 CREATE (a:中药 {name: '人参'})
@@ -57,12 +57,12 @@ class TestNeo4jIntegration:
             assert record["drug"] == "人参"
             assert record["efficacy"] == "大补元气"
 
-    def test_vector_storage(self, neo4j_driver, clean_database):
+    def test_vector_storage(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test storing and retrieving vector embeddings"""
         embedder = SimpleHashEmbedder(dimension=1536)
         embedding = embedder.embed_query("test text")
 
-        with neo4j_driver.session() as session:
+        with neo4j_driver.session(database=neo4j_test_config["database"]) as session:
             # Store embedding
             session.run(
                 "CREATE (c:Chunk {text: $text, embedding: $embedding})",
@@ -80,9 +80,9 @@ class TestNeo4jIntegration:
             assert len(retrieved_embedding) == 1536
             assert retrieved_embedding == embedding
 
-    def test_graph_traversal(self, neo4j_driver, clean_database):
+    def test_graph_traversal(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test graph traversal queries"""
-        with neo4j_driver.session() as session:
+        with neo4j_driver.session(database=neo4j_test_config["database"]) as session:
             # Create a small knowledge graph
             session.run("""
                 CREATE (drug:中药 {name: '人参'})

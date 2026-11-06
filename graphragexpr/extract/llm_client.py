@@ -210,6 +210,13 @@ class OpenAICompatibleClient(_BaseClient):
                 timeout=settings.llm_timeout_s,
             )
         self._model = os.getenv("LLM_MODEL", "deepseek-chat")
+        self._endpoint = str(getattr(self._client, "base_url", None) or
+                             os.getenv("LLM_ENDPOINT") or "https://api.openai.com/v1")
+
+    @property
+    def cache_identity(self) -> dict[str, str]:
+        """Actual provider identity, without API credentials."""
+        return {"model": self._model, "endpoint": self._endpoint}
 
     def complete_json(
         self, *, system: str, user: str, schema: type[BaseModel], purpose: str
