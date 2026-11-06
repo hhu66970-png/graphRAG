@@ -606,6 +606,15 @@ def _generate_keyword_graph(question, chunks, triples, *, use_graph=True):
             f"[教材片段 {position}｜PDF 第 {page_label} 页]\n{chunk['text']}"
         )
 
+    # Match auto's existing evidence-only behavior when a new checkout has no model key.
+    # Keep retrieval/provenance intact, and never present raw quotes as verified conclusions.
+    llm_token = (os.getenv("LLM_TOKEN") or "").strip()
+    if not llm_token:
+        return (
+            "当前未配置模型接口，以下仅展示本次检索到的教材原文和页码，"
+            "未生成或核验回答。\n\n" + "\n\n".join(textbook_context)
+        )
+
     if use_graph:
         graph_context = "\n".join(
             f"- {source} --[{relationship}]--> {target}"
@@ -643,7 +652,7 @@ def _generate_keyword_graph(question, chunks, triples, *, use_graph=True):
 """
 
     client = OpenAI(
-        api_key=os.getenv("LLM_TOKEN"),
+        api_key=llm_token,
         base_url=os.getenv("LLM_ENDPOINT") or None,
     )
     response = client.chat.completions.create(
