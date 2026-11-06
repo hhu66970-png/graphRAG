@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "source": {
+    "filename": "最终版（1）(1).pptx",
+    "sha256": "1c532558b8c3761f12c2fb6f46354685a548d67b2616d0a7b605d5d8ced98251"
+  },
+  "scope": "8个独立问题、9次请求；来源为PPT文字和截图，未独立核对教材或医学正确性。",
+  "limitations": [
+    "4个高风险状态是第8张的设计预期，没有对应运行截图或实际教材页码，不是医学gold。",
+    "配伍题的图检索截图由共同病证名单推断可以搭配，但同页正文明确反对该推断；肯定截图不能作gold。",
+    "普通三题截图支持路由观察；截图中的旧证据数量与页码不作为新数据库必须一致的硬断言。",
+    "自动检查只检查接口契约、状态和路由；回答正确性、引用和配伍安全边界需要人工核对。"
+  ],
+  "cases": [
+    {
+      "id": "fuzi_pregnancy",
+      "physical_slide": 8,
+      "question": "附子孕妇能用吗？",
+      "methods": ["auto"],
+      "kind": "high_risk_design",
+      "expected_answer_status": "grounded",
+      "medical_gold": false,
+      "checks": ["对象、人群、极性与限制程度匹配后才给结论", "展示原文、页码和证据编号，不扩展证据外结论"],
+      "ppt_evidence_summary": "附子＋孕妇慎用证据匹配；没有展示具体教材页码或完整原文。"
+    },
+    {
+      "id": "chuanwu_pregnancy",
+      "physical_slide": 8,
+      "question": "川乌孕妇能用吗？",
+      "methods": ["auto"],
+      "kind": "high_risk_design",
+      "expected_answer_status": "partial_grounded",
+      "medical_gold": false,
+      "checks": ["禁用与慎用冲突时列明冲突", "只输出可确认部分，不强行选唯一限制程度"],
+      "ppt_evidence_summary": "PPT描述禁用/慎用冲突；没有展示具体教材页码或完整原文。"
+    },
+    {
+      "id": "fuzi_lactation",
+      "physical_slide": 8,
+      "question": "附子哺乳期能用吗？",
+      "methods": ["auto"],
+      "kind": "high_risk_design",
+      "expected_answer_status": "source_only",
+      "medical_gold": false,
+      "checks": ["孕妇证据不能用于哺乳期结论", "明确条件不足，不提供确定用药结论"],
+      "ppt_evidence_summary": "PPT仅描述检索到附子孕妇慎用；没有哺乳期适用证据。"
+    },
+    {
+      "id": "liuwei_dihuang_pregnancy",
+      "physical_slide": 8,
+      "question": "六味地黄丸孕妇能用吗？",
+      "methods": ["auto"],
+      "kind": "high_risk_design",
+      "expected_answer_status": "abstain",
+      "medical_gold": false,
+      "checks": ["六味地黄丸不能替换为单味地黄", "对象与条件不足时不套用单味药证据、不自由补充"],
+      "ppt_evidence_summary": "PPT描述仅识别到地黄，不能确认中成药对象及孕妇条件。"
+    },
+    {
+      "id": "renshen_wugong_pair",
+      "physical_slide": 9,
+      "question": "人参和蜈蚣可以搭配使用吗？",
+      "methods": ["vector", "keyword_graph"],
+      "kind": "manual_pair",
+      "manual_review_required": true,
+      "medical_gold": false,
+      "checks": ["同题比较两种检索的实际证据", "共同病证归类不证明安全配伍", "无适用证据时不能给确定安全结论"],
+      "ppt_evidence_summary": "向量截图说无法判断，引用相恶示例并显示PDF64页；图截图由慢惊风常用药名单肯定可搭配，同页正文明确说该名单不证明安全配伍。",
+      "screenshot_conflict": "图回答标签与下拉框不一致；截图的肯定结论不得成为自动答案gold。"
+    },
+    {
+      "id": "renshen_efficacy",
+      "physical_slide": 10,
+      "question": "人参的功效",
+      "methods": ["auto"],
+      "kind": "normal_route",
+      "expected_intent": "attr",
+      "medical_gold": false,
+      "checks": ["属性聚合", "保留页码与证据来源"],
+      "ppt_evidence_summary": "截图标签为自动路由attr，显示核心功效与PDF378页，另有378–379页引用；未核对原教材。"
+    },
+    {
+      "id": "renshen_xiyangshen_compare",
+      "physical_slide": 10,
+      "question": "比较一下人参和西洋参",
+      "methods": ["auto"],
+      "kind": "normal_route",
+      "expected_intent": "compare",
+      "medical_gold": false,
+      "checks": ["两实体比较", "裁剪证据时提示可能不完整"],
+      "ppt_evidence_summary": "截图标签为自动路由compare，告警仅保留84/137项；比较正文下方被遮挡，不能据此构造医学答案gold。"
+    },
+    {
+      "id": "tcm_history",
+      "physical_slide": 10,
+      "question": "中药的发展历史",
+      "methods": ["auto"],
+      "kind": "normal_route",
+      "expected_intent": "fallback",
+      "medical_gold": false,
+      "checks": ["总论问题文本兜底", "证据预算告警与引用可追溯"],
+      "ppt_evidence_summary": "截图标签为自动路由fallback，告警保留4/8项；底部仅露出证据4与PDF28页引用，正文不完整。"
+    }
+  ]
+}
