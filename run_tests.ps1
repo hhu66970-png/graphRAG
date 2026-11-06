@@ -7,6 +7,7 @@ Write-Host "Running tests..." -ForegroundColor Yellow
 Write-Host ""
 
 $env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUTF8 = "1"
 $pythonExe = & "$PSScriptRoot\scripts\resolve_python.ps1"
 & $pythonExe -m pytest -m "not integration" -v --tb=short
 $testExitCode = $LASTEXITCODE

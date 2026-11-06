@@ -81,12 +81,12 @@ def test_unavailable_database_is_not_reported_as_healthy(client, api_module, mon
 
 def test_compose_requires_password_and_publishes_only_on_loopback():
     root = Path(__file__).resolve().parents[2]
-    config = yaml.safe_load((root / "docker-compose.yml").read_text())
+    config = yaml.safe_load((root / "docker-compose.yml").read_text(encoding="utf-8"))
     service = config["services"]["neo4j"]
     assert all(port.startswith("127.0.0.1:") for port in service["ports"])
     assert "${NEO4J_PASSWORD:?" in service["environment"]["NEO4J_AUTH"]
     example = dict(
-        line.split("=", 1) for line in (root / ".env.example").read_text().splitlines()
+        line.split("=", 1) for line in (root / ".env.example").read_text(encoding="utf-8").splitlines()
         if line and not line.startswith("#")
     )
     assert example["NEO4J_PASSWORD"] == ""

@@ -8,7 +8,7 @@ from scripts import preprocess_pdf as ocr
 
 class Document:
     page_count = 1
-    def __init__(self, path): self.content = path.read_text()
+    def __init__(self, path): self.content = path.read_text(encoding='utf-8')
     def __enter__(self): return self
     def __exit__(self, *args): pass
     def __getitem__(self, index): return self.content
@@ -38,7 +38,7 @@ def test_different_pdfs_do_not_share_page_cache(tmp_path, monkeypatch, backend):
     second.write_text('SECOND TEXT')
     run(monkeypatch, first, tmp_path / 'first.md')
     run(monkeypatch, second, tmp_path / 'second.md')
-    text = (tmp_path / 'second.md').read_text()
+    text = (tmp_path / 'second.md').read_text(encoding='utf-8')
     assert 'SECOND TEXT' in text and 'FIRST TEXT' not in text
     assert len(backend) == 2
     # Resume need not construct the expensive OCR engine.
@@ -78,5 +78,5 @@ def test_atomic_write_preserves_previous_file_on_replace_failure(tmp_path, monke
     def fail(*args): raise OSError('disk error')
     monkeypatch.setattr(Path, 'replace', fail)
     with pytest.raises(OSError): atomic_write_text(path, 'replacement')
-    assert path.read_text() == 'complete'
+    assert path.read_text(encoding='utf-8') == 'complete'
     assert list(tmp_path.iterdir()) == [path]
