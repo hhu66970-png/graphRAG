@@ -1,4 +1,4 @@
-"""真实请求 → 最终响应的自动化回归（任务书要求的三反例 + 正确对照）。
+"""真实请求 → 最终响应的自动化回归。
 
 与其它高风险测试的区别：这里**不注入任何替身**。从 Flask 的
 `POST /api/graphrag` 出发，走真实链接、真实只读读取、真实核验与渲染，
@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -27,9 +28,7 @@ if str(ROOT) not in sys.path:
 
 from graphragexpr.domain.high_risk import AnswerStatus  # noqa: E402
 
-pytestmark = pytest.mark.integration
-
-FRONTEND = ROOT / "frontend" / "index.html"
+FRONTEND = ROOT / "frontend" / "assets" / "app.js"
 
 #: 前端的状态 → 徽标类名映射。用户看到的「已核验」完全由它决定，
 #: 因此必须与后端四档状态一起回归，而不是只测后端字段。
@@ -41,7 +40,7 @@ def _frontend_status_classes() -> dict[str, str]:
     """前端高风险状态对应的样式类。"""
     source = FRONTEND.read_text(encoding="utf-8")
     block = _CLASS_BLOCK.search(source)
-    assert block, "frontend/index.html 里找不到 HR_STATUS_CLASS，徽标回归无从进行"
+    assert block, "frontend/assets/app.js 里找不到 HR_STATUS_CLASS，徽标回归无从进行"
     return dict(_CLASS_ENTRY.findall(block.group(1)))
 
 
@@ -72,10 +71,13 @@ def client():
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / ".env")
-    try:
-        import backend.api as api
-    except Exception as exc:  # 依赖缺失不应伪装成通过
-        pytest.skip(f"后端 API 无法导入，跳过端到端回归：{exc}")
+    required = ("NEO4J_URL", "NEO4J_USER", "NEO4J_PASSWORD")
+    missing = [name for name in required if not os.getenv(name, "").strip()]
+    if missing:
+        pytest.skip(f"教材库未配置 {', '.join(missing)}，跳过端到端回归")
+
+    import backend.api as api
+    from neo4j.exceptions import AuthError, ServiceUnavailable, SessionExpired
 
     from graphragexpr.storage import serving_read
     from graphragexpr.storage.neo4j_store import Neo4jStore
@@ -83,7 +85,7 @@ def client():
     store = Neo4jStore()
     try:
         active_run = serving_read.active_run(store)
-    except Exception as exc:
+    except (AuthError, ServiceUnavailable, SessionExpired) as exc:
         pytest.skip(f"读不到图数据库，跳过端到端回归：{exc}")
     finally:
         store.close()
@@ -113,6 +115,7 @@ def claims_of(data: dict) -> list[dict]:
 
 
 # --------------------------------------------------------------- 反例一
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "question, longer",
     [
@@ -139,6 +142,7 @@ def test_patent_medicine_is_not_answered_as_a_single_herb(client, question, long
 
 
 # --------------------------------------------------------------- 反例二
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "question, population",
     [("附子哺乳期能用吗？", "哺乳期"), ("附子小儿能用吗？", "小儿")],
@@ -158,6 +162,7 @@ def test_pregnancy_evidence_does_not_answer_other_populations(client, question, 
 
 
 # --------------------------------------------------------------- 反例三
+@pytest.mark.integration
 def test_unknown_object_does_not_fall_back_to_enumeration(client):
     """没识别出指定药物时，不得改去反向枚举别的药物。"""
     data = ask(client, "布洛芬孕妇能吃吗？")
@@ -173,6 +178,7 @@ def test_unknown_object_does_not_fall_back_to_enumeration(client):
 
 
 # --------------------------------------------------------------- 对照组
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "question, subject, marker",
     [
@@ -197,6 +203,7 @@ def test_matching_population_is_still_answered(client, question, subject, marker
     assert marker in data["answer"]
 
 
+@pytest.mark.integration
 def test_incompatibility_and_dosage_controls_still_answer(client):
     """另外两组正确对照：配伍禁忌与用量。"""
     incompat = ask(client, "附子不宜与什么药同用？")
@@ -213,6 +220,7 @@ def test_incompatibility_and_dosage_controls_still_answer(client):
         assert claim["pages"]
 
 
+@pytest.mark.integration
 def test_unresolved_severity_conflict_is_not_presented_as_verified(client):
     """两处来源程度不一致且未经人工裁定时，不得挑一档当已核验的结论。
 
@@ -234,6 +242,7 @@ def test_unresolved_severity_conflict_is_not_presented_as_verified(client):
     assert "禁用" in text and "慎用" in notes
 
 
+@pytest.mark.integration
 def test_legal_enumeration_lists_objects_and_separates_severity(client):
     """合法的反向枚举必须能答，且逐条区分「禁用」与「慎用」。
 

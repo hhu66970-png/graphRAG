@@ -17,7 +17,6 @@ class ExternalEmbedder:
     """Generate matching query/document vectors with the configured provider."""
 
     def __init__(self, dimension: int | None = None):
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.dimension = dimension or int(os.getenv("EMBED_DIM", "512"))
         self.provider = (os.getenv("EMBED_PROVIDER") or "hash").strip().lower()
         self.endpoint = (os.getenv("EMBED_ENDPOINT") or "").strip()

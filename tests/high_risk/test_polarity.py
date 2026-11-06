@@ -1,4 +1,4 @@
-"""旧极性解释的分场景否定作用域测试（任务书 §4）。
+"""旧极性解释的分场景否定作用域测试。
 
 教材里「不宜与藜芦同用」「孕妇慎用」都是**肯定地陈述了一条禁忌**：NEGATIVE 否定的
 是「同用」「使用」这个动作，不是禁忌本身不存在。解释反了就会得出「麻黄可以和藜芦
@@ -61,7 +61,6 @@ def test_restricted_use_keeps_the_contraindication():
 
 
 def test_positive_polarity_without_negation_cues_holds():
-    """测试：肯定极性没有否定线索成立。"""
     interpretation = interpret(
         "INCOMPATIBLE_WITH", "POSITIVE", "麻黄与藜芦同用需谨慎。", "藜芦"
     )

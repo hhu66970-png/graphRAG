@@ -131,7 +131,6 @@ class ApiFakeStore(FakeHighRiskStore):
         active_run_id: str | None = "run-test",
         linked_rows: list[dict] | None = None,
     ) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         super().__init__(rows)
         self.active_run_id = active_run_id
         self.linked_rows = list(linked_rows or [])
@@ -139,7 +138,7 @@ class ApiFakeStore(FakeHighRiskStore):
 
     def run(self, cypher: str, **params):
         """测试替身：执行一条 Cypher 并返回假结果。"""
-        if "IngestRun" in cypher:
+        if "MATCH (r:IngestRun" in cypher:
             self.calls.append({"cypher": cypher, **params})
             return [{"run_id": self.active_run_id}] if self.active_run_id else []
         # 先判「更长实体名」：它的条件与链接查询不重叠，但顺序固定下来更清楚。
@@ -152,7 +151,7 @@ class ApiFakeStore(FakeHighRiskStore):
         return super().run(cypher, **params)
 
     def close(self) -> None:
-        """关闭底层 Driver 连接池。"""
+        """记录关闭次数。"""
         self.closed += 1
 
 
@@ -164,7 +163,6 @@ class NormalLLM:
     """
 
     def __init__(self, *, text: str = FREE_TEXT, error: Exception | None = None) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.text = text
         self.error = error
         self.constructed = 0
@@ -180,16 +178,14 @@ class NormalLLM:
         owner = self
 
         class _FakeOpenAI:
-            """_FakeOpenAI：测试替身，用来隔离真实 Neo4j 或 LLM。"""
             def __init__(self, *args, **kwargs):
-                """初始化该对象，保存后续调用所需的配置或依赖。"""
                 owner.constructed += 1
                 self.chat = SimpleNamespace(
                     completions=SimpleNamespace(create=self._create)
                 )
 
             def _create(self, **kwargs):
-                """为无法链接的表面名新建实体记录。"""
+                """记录请求并返回预设的模型响应。"""
                 owner.prompts.append(
                     "\n".join(
                         str(message.get("content", ""))
@@ -212,6 +208,8 @@ def api_module(monkeypatch):
     """后端模块；`_high_risk_client` 置空，使最终文字只由程序模板生成。"""
     import backend.api as api
 
+    # Ordinary-answer tests exercise the fake LLM even without a local .env.
+    monkeypatch.setenv("LLM_TOKEN", "test-token")
     monkeypatch.setattr(api, "_high_risk_client", lambda: None)
     return api
 

@@ -1,4 +1,4 @@
-"""抽取管线端到端测试（FakeLLM，不依赖在线 API —— SKILL §8.6）。
+"""抽取管线端到端测试（FakeLLM，不依赖在线 API）。
 
 覆盖 2.1.1–2.1.3 的整合行为：严格 Schema -> I1 链接 -> 证据定位 -> I2 验证 -> Assertion。
 """
@@ -70,9 +70,7 @@ def _build(ontology, settings, extraction_json: str, verdicts: list[str] | None 
 
 
 class TestExtractorPipeline:
-    """测试类：覆盖「ExtractorPipeline」相关行为。"""
     def test_clean_relation_becomes_accepted_assertion(self, ontology, chunk):
-        """测试：干净的关系变成通过断言。"""
         settings = KGSettings()
         extractor, llm = _build(ontology, settings, _extraction([
             {"subject": "人参", "predicate": "HAS_EFFICACY", "object_text": "大补元气",
@@ -94,7 +92,7 @@ class TestExtractorPipeline:
         record.assert_publishable()
 
     def test_unknown_predicate_is_recorded_and_rejected(self, ontology, chunk):
-        """SKILL §3.4：未知谓词必须记录并拒绝，不得静默塞进图里。
+        """未知谓词必须记录并拒绝，不得静默塞进图里。
 
         旧实现会把「主编」「习称」这类词直接变成关系类型，造成 182 种关系。
         """
@@ -109,7 +107,6 @@ class TestExtractorPipeline:
         assert outcome.rejected[0]["reason"] == "unknown_predicate"
 
     def test_unknown_entity_type_not_downgraded_to_concept(self, ontology, chunk):
-        """测试：未知实体类型不降级到概念。"""
         settings = KGSettings()
         extractor, _ = _build(
             ontology, settings,
@@ -124,7 +121,6 @@ class TestExtractorPipeline:
         assert outcome.assertions == []
 
     def test_domain_range_violation_rejected(self, ontology, chunk):
-        """测试：定义域区间违规被拒绝。"""
         settings = KGSettings()
         extractor, _ = _build(ontology, settings, _extraction([
             {"subject": "大补元气", "predicate": "ENTERS_MERIDIAN", "object_text": "人参",
@@ -150,7 +146,6 @@ class TestExtractorPipeline:
         record.assert_publishable()  # REVIEW 不触发门槛
 
     def test_dosage_becomes_value_object_with_high_risk_verification(self, ontology, chunk):
-        """测试：剂量变成值宾语带高风险二次校验。"""
         settings = KGSettings()
         extractor, llm = _build(ontology, settings, _extraction([
             {"subject": "人参", "predicate": "HAS_DOSAGE", "object_text": "煎服，3～9g",
@@ -181,7 +176,6 @@ class TestExtractorPipeline:
         assert record.predicate == "INCOMPATIBLE_WITH"
 
     def test_same_name_different_type_gets_distinct_identity(self, ontology, chunk):
-        """测试：相同名称不同类型gets不同的身份。"""
         settings = KGSettings()
         extractor, _ = _build(ontology, settings, _extraction(
             relations=[
@@ -212,7 +206,6 @@ class TestExtractorPipeline:
         assert outcome.assertions[0].validation_status == "REVIEW"
 
     def test_counts_expose_failure_ledger(self, ontology, chunk):
-        """测试：算作暴露失败失败清单。"""
         settings = KGSettings()
         extractor, _ = _build(ontology, settings, _extraction([
             {"subject": "人参", "predicate": "HAS_EFFICACY", "object_text": "大补元气",
@@ -228,7 +221,7 @@ class TestExtractorPipeline:
 
 
 class TestEntryContinuation:
-    """I3 跨块补全：把省略主语的句子归属到条目锚点药（设计 §2.1.1-3 / §2.1.2-D）。"""
+    """I3 跨块补全：把省略主语的句子归属到条目锚点药。"""
 
     CONT_TEXT = (
         "本品味辛性凉，有发表散邪、解肌退热之功。煎服，9～15g。\n"
@@ -319,7 +312,6 @@ class TestEntryContinuation:
         assert outcome.assertions[0].match_mode == "not_found"
 
     def test_dosage_in_continuation_parsed_as_value_object(self, ontology):
-        """测试：剂量在续写被解析作为值宾语。"""
         settings = KGSettings()
         llm = FakeLLMClient(
             responses={

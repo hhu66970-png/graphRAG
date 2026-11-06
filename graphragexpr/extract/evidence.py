@@ -1,4 +1,4 @@
-"""Evidence localisation with character spans (设计 §2.1.2-B).
+"""Evidence localisation with character spans.
 
 `evidence_quote in source_text` 对 OCR 文本过于脆弱：OCR 会引入空格、换行、
 全半角与标点差异。本模块按四级顺序定位证据，并**始终返回原文字符跨度**：
@@ -7,9 +7,9 @@
     2. raw_exact        —— 原文精确子串
     3. normalized_exact —— 规范化后精确子串，再映射回原文跨度
     4. fuzzy            —— 极小编辑距离对齐（受 max_edit 限制）
-    否则 not_found      —— 只能 REVIEW，不得正式入图（SKILL §3.1）
+    否则 not_found      —— 只能 REVIEW，不得正式入图
 
-规范化只用于匹配，**绝不覆盖原始证据文本**（SKILL §7.2）。
+规范化只用于匹配，**绝不覆盖原始证据文本**。
 """
 
 from __future__ import annotations

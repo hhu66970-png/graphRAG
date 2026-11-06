@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 
-from ..config.settings import DEFAULT_RETRIEVAL_SETTINGS, RetrievalSettings
+from ..config.settings import RetrievalSettings
 from ..domain.models import EvidenceItem, EvidencePacket
 from ..domain.ontology import Ontology
 from ..domain.high_risk import TASK_HIGH_RISK_PREDICATES
@@ -125,7 +125,7 @@ def _path_score(path: dict) -> float:
     min_support = min(edge_scores, default=0.0)
     evidence_coverage = sum(bool(group) for group in groups) / edge_count
     length_decay = 1.0 / edge_count
-    # PathRAG-inspired ranking from design section 2.3.4. Endpoints and predicates have
+    # PathRAG-inspired ranking. Endpoints and predicates have
     # already passed exact entity linking and the ontology whitelist.
     return round(
         0.25
@@ -577,9 +577,10 @@ def retrieve(
     run_id: str | None = None,
     fallback_retriever: FallbackRetriever | None = None,
     token_budget: int | None = None,
-    settings: RetrievalSettings = DEFAULT_RETRIEVAL_SETTINGS,
+    settings: RetrievalSettings | None = None,
 ) -> RetrievalResult:
     """Link, route and retrieve one question without generating natural language."""
+    settings = settings or RetrievalSettings()
     active_run_id = run_id or serving_read.active_run(store)
     if not active_run_id:
         raise RuntimeError("没有 ACTIVE 的 IngestRun")

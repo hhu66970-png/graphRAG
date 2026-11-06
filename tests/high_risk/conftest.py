@@ -7,7 +7,7 @@
 2. **但真实走完编排。** 假存储只替代最外层的 Cypher 执行，条件单元组装、
    极性解释、候选生成、程序核验、状态判定与渲染全部是生产代码。
 3. **记录调用参数。** 假存储会留下每次调用的参数，使「参数化查询、限定 run、
-   限定结果数」（任务书 §4）可以被断言，而不是靠读代码相信。
+   限定结果数」可以被断言，而不是靠读代码相信。
 """
 
 from __future__ import annotations
@@ -81,7 +81,6 @@ class FakeHighRiskStore:
     """In-memory stand-in for the read paths used by the high-risk service."""
 
     def __init__(self, rows: list[dict] | None = None) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.rows = list(rows or [])
         self.calls: list[dict] = []
 
@@ -127,7 +126,6 @@ class ScriptedLLM:
     """
 
     def __init__(self, responses: list[ClaimBatch | BaseModel | Exception]) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._responses = list(responses)
         self.calls: list[dict] = []
 

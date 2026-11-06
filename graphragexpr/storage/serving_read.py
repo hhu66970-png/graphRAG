@@ -1,11 +1,11 @@
-"""Read access over the typed serving projection (SKILL §5.5).
+"""Read access over the typed serving projection.
 
 本模块只负责「把 ACTIVE run 的类型化边读成结构化结果」，**不生成自然语言答案、
-不做意图路由**——那属于 retrieval / generation 层（SKILL §5.6 / §5.8）。
+不做意图路由**——那属于 retrieval / generation 层。
 API 层可以直接编排这些函数来演示 v2 图谱，而不必复制任何检索逻辑。
 
 每个返回项都带 `page_start/page_end` 与 `evidence_ids`，使调用方能一路回溯到
-Assertion 层的逐字原句（SKILL §3.1 证据优先）。
+Assertion 层的逐字原句。
 """
 
 from __future__ import annotations
@@ -36,12 +36,16 @@ CARD_SLOT_ORDER: tuple[str, ...] = (
 
 _FIND_HERB = """
 MATCH (e:Entity {entity_type: 'HERB'})
-WHERE (e.preferred_name = $name OR $name IN coalesce(e.aliases, []))
+OPTIONAL MATCH (e)-[membership:IN_RUN]->(:IngestRun {run_id: $run})
+WITH e, membership
+WHERE (e.preferred_name = $name OR $name IN coalesce(membership.aliases, e.aliases, []))
   AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[:IN_RUN]->(:IngestRun {run_id: $run})
+  } OR EXISTS {
     MATCH (e)-[serving]-()
     WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
   })
-RETURN e.canonical_id AS canonical_id, e.preferred_name AS name, e.aliases AS aliases
+RETURN e.canonical_id AS canonical_id, e.preferred_name AS name, coalesce(membership.aliases, e.aliases, []) AS aliases
 LIMIT 1
 """
 
@@ -206,7 +210,6 @@ class CardSlot:
 
 @dataclass
 class HerbCard:
-    """HerbCard：本文件定义的数据结构或组件。"""
     canonical_id: str
     name: str
     aliases: list[str]
@@ -311,10 +314,14 @@ def get_herb_card(
 # 同为 2 字，会把真正的中药挤出 LIMIT。
 _LINK_IN_TEXT = """
 MATCH (e:Entity)
+OPTIONAL MATCH (e)-[membership:IN_RUN]->(:IngestRun {run_id: $run})
+WITH e, membership
 WHERE e.entity_type IN $types
-  AND any(surface IN [e.preferred_name] + coalesce(e.aliases, [])
+  AND any(surface IN [e.preferred_name] + coalesce(membership.aliases, e.aliases, [])
           WHERE surface IS NOT NULL AND size(surface) >= 2 AND $text CONTAINS surface)
   AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[:IN_RUN]->(:IngestRun {run_id: $run})
+  } OR EXISTS {
     MATCH (e)-[serving]-()
     WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
   })
@@ -328,12 +335,16 @@ LIMIT $limit
 
 _LONGER_ENTITY_IN_TEXT = """
 MATCH (e:Entity)
+OPTIONAL MATCH (e)-[membership:IN_RUN]->(:IngestRun {run_id: $run})
+WITH e, membership
 WHERE e.preferred_name IS NOT NULL
   AND (e.run_id = $run OR EXISTS {
+    MATCH (e)-[:IN_RUN]->(:IngestRun {run_id: $run})
+  } OR EXISTS {
     MATCH (e)-[serving]-()
     WHERE serving.fact_key IS NOT NULL AND serving.active_run_id = $run
   })
-  AND any(surface IN [e.preferred_name] + coalesce(e.aliases, [])
+  AND any(surface IN [e.preferred_name] + coalesce(membership.aliases, e.aliases, [])
           WHERE surface IS NOT NULL
             AND size(surface) > size($name)
             AND surface CONTAINS $name
@@ -372,7 +383,7 @@ def link_entities_in_text(
 ) -> list[dict]:
     """Longest-match entity linking against the ACTIVE run's canonical entities.
 
-    仅用于 API 层的演示编排；正式的实体链接与意图路由属 retrieval 层（SKILL §5.6）。
+    仅用于 API 层的演示编排；正式的实体链接与意图路由属 retrieval 层。
     按名称长度降序返回，调用方取第一个即为最长匹配。
     """
     return store.run(
@@ -596,7 +607,7 @@ def card_to_context(card: HerbCard, evidence: list[dict]) -> tuple[str, list[dic
     """Serialise a card into prompt context plus a source list.
 
     确定性序列化：列名、页码、证据都由程序填充，不交给模型决定
-    （对应设计 §2.3.5「引用页码由程序填充」）。
+    （对应「引用页码由程序填充」）。
     """
     lines = [f"【{card.name}】"]
     if card.aliases:

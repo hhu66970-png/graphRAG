@@ -37,7 +37,6 @@ REQUIRED_FIELDS = {
 
 @dataclass(frozen=True)
 class RetrievalDataset:
-    """RetrievalDataset：本文件定义的数据结构或组件。"""
     rows: list[dict]
     summary: dict[str, Any]
     validation_errors: list[str]

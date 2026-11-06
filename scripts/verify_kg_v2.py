@@ -107,7 +107,9 @@ def compare(store: Neo4jStore, run_id: str) -> None:
 
     legacy_concept = store.run("MATCH (e:概念) RETURN count(e) AS value")[0]["value"]
     v2_concept = store.run(
-        "MATCH (e:Entity {entity_type: 'CONCEPT'}) WHERE e.run_id = $run RETURN count(e) AS value",
+        "MATCH (e:Entity {entity_type: 'CONCEPT'}) "
+        "WHERE e.run_id = $run OR EXISTS { MATCH (e)-[:IN_RUN]->(:IngestRun {run_id: $run}) } "
+        "RETURN count(e) AS value",
         run=run_id,
     )[0]["value"]
     print(f"{'CONCEPT 兜底节点':<28}{legacy_concept:>18}{v2_concept:>18}")
@@ -177,7 +179,6 @@ def show_herb(store: Neo4jStore, run_id: str, herb: str) -> None:
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Verify the v2 KG against legacy defects")
     parser.add_argument("--herb", default="人参", help="用于属性聚合演示的药名")

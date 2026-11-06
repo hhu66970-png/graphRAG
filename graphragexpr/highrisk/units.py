@@ -1,4 +1,4 @@
-"""从断言与原文组装条件证据单元（任务书 §5）。
+"""从断言与原文组装条件证据单元。
 
 组装规则的核心是**一个单元 = 一个可独立成立的事实 + 它成立所依赖的全部条件**：
 
@@ -63,7 +63,7 @@ def _pages(row: dict) -> tuple[int | None, int | None, bool]:
 def _context_of(row: dict) -> str:
     """完整相关上下文：优先取来源块原文，退化到证据句。
 
-    结构化困难时上层要展示完整相关上下文（任务书 §5.4 / 验收 §11），
+    结构化困难时上层要展示完整相关上下文，
     因此上下文必须与证据一起带出来，而不是到渲染时再去查库。
     """
     texts = [text for text in (row.get("chunk_texts") or []) if text]
@@ -165,7 +165,6 @@ def _dosage_units_from_assertion(row: dict) -> list[ConditionalEvidenceUnit]:
         reason = None
         if binding.is_inverted:
             # 面向读者：说明**系统不据此给出剂量**，而不是把核对工作推给读者
-            # （第三部分 §6）。
             reason = "原文剂量上界小于下界，未做自动交换；系统不据此给出确定剂量"
         elif not binding.is_bound_to_unit():
             reason = "数值与单位未能绑定，不能据此给出确定剂量"
@@ -283,7 +282,7 @@ def build_units_from_assertions(rows: list[dict]) -> list[ConditionalEvidenceUni
     for row in rows:
         predicate = row.get("predicate") or ""
         if predicate not in PREDICATE_CATEGORY:
-            continue  # 本任务只处理三类关系
+            continue  # 此处只处理三类关系
         if predicate == "HAS_DOSAGE":
             units.extend(_dosage_units_from_assertion(row))
         else:
@@ -298,7 +297,7 @@ def build_units_from_chunks(
 ) -> list[ConditionalEvidenceUnit]:
     """Adapter: turn retrieved raw text into TEXT_CHUNK-sourced units.
 
-    向量／全文检索返回的原文经此进入同一证据处理流程（任务书 §4）。
+    向量／全文检索返回的原文经此进入同一证据处理流程。
     这类单元的 `assertion_id` 恒为 None——原文证据**不得**被升级为通过断言，
     只记录稳定的文本块标识与位置标识。
     """

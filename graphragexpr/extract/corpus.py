@@ -15,7 +15,6 @@ SENTENCE_END_RE = re.compile(r"[。！？；]\s*$")
 
 @dataclass(frozen=True)
 class ChunkRecord:
-    """ChunkRecord：本文件定义的数据结构或组件。"""
     index: int
     text: str
     page_start: int | None

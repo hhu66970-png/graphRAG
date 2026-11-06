@@ -8,7 +8,7 @@
       -> I2 规则验证 + 灰区二次校验（rule_score / final_score 语义分离）
       -> AssertionRecord（带 chunk_ids、页码、evidence_quote、版本）
 
-本模块**不决定发布哪个 Run**，只输出结构化候选与验证结果（SKILL §5.4）。
+本模块**不决定发布哪个 Run**，只输出结构化候选与验证结果。
 """
 
 from __future__ import annotations
@@ -93,13 +93,11 @@ _ENTRY_USER_TEMPLATE = """本片段出自《中药学》中【{anchor}】的条�
 
 
 class _RawEntity(BaseModel):
-    """_RawEntity：本模块内部使用的数据结构。"""
     name: str
     entity_type: str
 
 
 class _RawRelation(BaseModel):
-    """_RawRelation：本模块内部使用的数据结构。"""
     subject: str
     predicate: str
     object_text: str
@@ -109,7 +107,7 @@ class _RawRelation(BaseModel):
 
 
 class RawExtraction(BaseModel):
-    """LLM 输出契约（SKILL §8.2：必须是严格 JSON，不从自然语言猜字段）。"""
+    """LLM 输出契约。"""
 
     entities: list[_RawEntity] = Field(default_factory=list)
     relations: list[_RawRelation] = Field(default_factory=list)
@@ -117,7 +115,7 @@ class RawExtraction(BaseModel):
 
 @dataclass
 class ExtractionOutcome:
-    """One chunk's extraction result plus a rejection ledger (SKILL §17: 不得隐藏失败)."""
+    """One chunk's extraction result plus a rejection ledger."""
 
     assertions: list[AssertionRecord] = field(default_factory=list)
     rejected: list[dict] = field(default_factory=list)
@@ -150,7 +148,6 @@ class ChunkExtractor:
         llm: LLMClient,
         run_id: str,
     ) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._ontology = ontology
         self._settings = settings
         self._resolver = resolver
@@ -165,7 +162,7 @@ class ChunkExtractor:
 
         Returns:
             ExtractionOutcome；被拒候选进入 `rejected`，未知类型/谓词分别登记，
-            供 health 接口与评测统计（SKILL §3.4 要求「记录并拒绝」）。
+            供 health 接口与评测统计。
 
         Side effects: 调用一次抽取 LLM；灰区关系可能各触发一次校验 LLM。
         """
@@ -221,7 +218,7 @@ class ChunkExtractor:
         显式注入 Prompt，只抽取主语为该药的关系，并把整个条目的 chunk_ids
         一并记入断言，使事实可回溯到条目内的全部来源块。
 
-        产出的候选**同样要过 I2 验证**（设计 §2.1.1-3），不因来自补全而放宽。
+        产出的候选**同样要过 I2 验证**，不因来自补全而放宽。
 
         Args:
             chunk: 条目内的某一块（通常是不含药名的续写块）。
@@ -390,10 +387,9 @@ class ChunkExtractor:
         )
 
     def _verify(self, chunk: ChunkRecord, relation: _RawRelation, quote: str) -> str:
-        """Second-pass verification. 只依据提供的证据，不允许调用常识（SKILL §8.4）。"""
+        """Second-pass verification. 只依据提供的证据，不允许调用常识。"""
 
         class _Verdict(BaseModel):
-            """_Verdict：本模块内部使用的数据结构。"""
             verdict: str
 
         # 注意：OpenAI 兼容接口在 response_format=json_object 下要求消息中出现

@@ -1,4 +1,4 @@
-"""Neo4j driver lifecycle and batched writes (SKILL §9.1 / §9.2).
+"""Neo4j driver lifecycle and batched writes.
 
 规则：
   - 进程生命周期内复用一个 Driver；
@@ -26,7 +26,6 @@ class Neo4jStore:
         password: str | None = None,
         database: str | None = None,
     ) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._url = url or os.getenv("NEO4J_URL")
         self._user = user or os.getenv("NEO4J_USER")
         self._password = password or os.getenv("NEO4J_PASSWORD")

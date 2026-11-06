@@ -1,53 +1,94 @@
-﻿# start_backend.ps1
-# 启动 Flask 后端：先探测 Neo4j Bolt，再运行 backend/api.py。
+﻿# 启动 Flask 后端并检查数据库连接。
 param(
-    [switch]$Detached
+    [switch]$Detached,
+    [ValidateRange(1, 300)]
+    [int]$StartupTimeoutSeconds = 30
 )
 
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "GraphRAG Backend API" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host ""
-$pythonExe = & "$PSScriptRoot\scripts\resolve_python.ps1"
-
-# Check if Neo4j is running
-Write-Host "Checking Neo4j connection..." -ForegroundColor Yellow
-try {
-    $result = & $pythonExe -c "from dotenv import load_dotenv; load_dotenv(); import os; from neo4j import GraphDatabase; d=GraphDatabase.driver(os.getenv('NEO4J_URL'), auth=(os.getenv('NEO4J_USER'), os.getenv('NEO4J_PASSWORD'))); d.verify_connectivity(); print('OK')"
-    if ($result -eq "OK") {
-        Write-Host "✓ Neo4j connected" -ForegroundColor Green
-    }
-} catch {
-    Write-Host "✗ Neo4j connection failed" -ForegroundColor Red
-    Write-Host "Please start Neo4j first" -ForegroundColor Yellow
-    exit 1
-}
-
-Write-Host ""
-Write-Host "Application: http://localhost:5000" -ForegroundColor Green
-
-if ($Detached) {
-    $env:PYTHONIOENCODING = "utf-8"
-    $outLog = Join-Path $PSScriptRoot "backend.api.out.log"
-    $errLog = Join-Path $PSScriptRoot "backend.api.err.log"
-    Write-Host "Starting detached backend (survives closing Cursor)..." -ForegroundColor Yellow
-    $proc = Start-Process -FilePath $pythonExe -ArgumentList "backend\api.py" `
-        -WorkingDirectory $PSScriptRoot `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $outLog `
-        -RedirectStandardError $errLog `
-        -PassThru
-    if (-not $proc) {
-        Write-Host "Failed to launch backend." -ForegroundColor Red
-        exit 1
-    }
-    Write-Host "Backend launched independently (PID $($proc.Id)). Close Cursor if you want; keep Neo4j running." -ForegroundColor Green
-    exit 0
-}
-
-Write-Host "Starting backend server in this window..." -ForegroundColor Yellow
-Write-Host "Press Ctrl+C to stop" -ForegroundColor Yellow
-Write-Host ""
-
+$ErrorActionPreference = "Stop"
 $env:PYTHONIOENCODING = "utf-8"
-& $pythonExe backend\api.py
+$proc = $null
+Push-Location $PSScriptRoot
+try {
+    $pythonExe = & "$PSScriptRoot\scripts\resolve_python.ps1"
+    if (-not $pythonExe) { throw "No Python interpreter was found." }
+    $backendScript = Join-Path $PSScriptRoot "backend/api.py"
+
+    Write-Host "Checking Neo4j connection..." -ForegroundColor Yellow
+    $probeScript = @'
+import json
+from backend.api import driver, _server_options
+try:
+    driver.verify_connectivity()
+    print(json.dumps(_server_options()))
+finally:
+    driver.close()
+'@
+    $probeResult = & $pythonExe -c $probeScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "Neo4j connection check failed. Check the service and .env settings."
+    }
+    $server = $probeResult | ConvertFrom-Json
+    if (-not $server.host -or -not $server.port) { throw "Invalid backend configuration." }
+    Write-Host "Neo4j connected" -ForegroundColor Green
+
+    $healthHost = $server.host
+    if ($healthHost -eq '0.0.0.0') { $healthHost = '127.0.0.1' }
+    if ($healthHost -eq '::') { $healthHost = '::1' }
+    if ($healthHost.Contains(':')) { $healthHost = "[$healthHost]" }
+    $baseUrl = "http://${healthHost}:$($server.port)"
+
+    if ($Detached) {
+        $outLog = Join-Path $PSScriptRoot "backend.api.out.log"
+        $errLog = Join-Path $PSScriptRoot "backend.api.err.log"
+        $startOptions = @{
+            FilePath = $pythonExe
+            ArgumentList = ('"' + $backendScript + '"')
+            WorkingDirectory = $PSScriptRoot
+            RedirectStandardOutput = $outLog
+            RedirectStandardError = $errLog
+            PassThru = $true
+        }
+        if ([System.Environment]::OSVersion.Platform -eq 'Win32NT') {
+            $startOptions.WindowStyle = 'Hidden'
+        }
+        $proc = Start-Process @startOptions
+        if (-not $proc) { throw "Failed to launch backend." }
+
+        $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            $proc.Refresh()
+            if ($proc.HasExited) {
+                throw "Backend exited with code $($proc.ExitCode). See $errLog"
+            }
+            try {
+                $health = Invoke-RestMethod -Uri "$baseUrl/api/health" -TimeoutSec 1
+            } catch {
+                $health = $null
+            }
+            # A pre-existing server on this port must not count as this launch succeeding.
+            if ($health -and $health.status -eq 'ok' -and $health.pid -eq $proc.Id) {
+                $proc.Refresh()
+                if ($proc.HasExited) { throw "Backend exited during startup. See $errLog" }
+                Write-Host "Backend ready at $baseUrl (PID $($proc.Id))." -ForegroundColor Green
+                exit 0
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        throw "Backend did not become healthy within $StartupTimeoutSeconds seconds. See $errLog"
+    }
+
+    Write-Host "Application: $baseUrl" -ForegroundColor Green
+    Write-Host "Press Ctrl+C to stop" -ForegroundColor Yellow
+    & $pythonExe $backendScript
+    exit $LASTEXITCODE
+} catch {
+    if ($proc) {
+        $proc.Refresh()
+        if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue }
+    }
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
+} finally {
+    Pop-Location
+}

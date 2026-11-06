@@ -1,4 +1,4 @@
-"""Score the KG against the textbook's own structured fields (设计 §9.2).
+"""Score the KG against the textbook's own structured fields.
 
     python scripts/eval_extraction.py                 # 评测当前 ACTIVE run
     python scripts/eval_extraction.py --run <run_id>  # 评测指定 run
@@ -38,7 +38,6 @@ ORDER BY c.index
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Extraction eval vs structured fields")
     parser.add_argument("--run", default=None)
@@ -111,7 +110,7 @@ def main() -> int:
 
         print("\n⚠ 口径提醒：Prec@field 标注了 ↓ 表示它是**下界**——图谱合理包含")
         print("  【应用】段落等字段之外的正确事实，它们不在参照集里但并不算错。")
-        print("  本参照集也不是设计 §9.1 要求的双人标注金标准。")
+        print("  本参照集也不是经双人标注的金标准。")
 
         if args.json:
             Path(args.json).write_text(

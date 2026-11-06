@@ -1,4 +1,4 @@
-"""高风险链路的三组对比评测（任务书 §9 / §11）。
+"""高风险链路的三组对比评测。
 
 默认只跑 C 组（条件证据单元 + 输出校验，即生产链路），因为 A/B 两组要调用
 模型。想跑 A/B 必须显式给 `--allow-llm`，否则如实报「未运行」。
@@ -29,7 +29,6 @@ from graphragexpr.evaluation.high_risk_eval import (  # noqa: E402
 
 def main() -> int:
     # 连接串只从 .env（已被忽略，不入库）或既有环境变量读取，脚本不回显任何密钥。
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)

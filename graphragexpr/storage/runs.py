@@ -1,4 +1,4 @@
-"""IngestRun lifecycle: BUILDING -> ACTIVE / FAILED (SKILL §3.7, 设计 §2.1.3).
+"""IngestRun lifecycle: BUILDING -> ACTIVE / FAILED.
 
 - 新构建写入 `IngestRun(status=BUILDING)`；
 - 质量检查通过后**原子切换**为 ACTIVE，同一时刻只允许一个 ACTIVE；
@@ -24,14 +24,13 @@ SUPERSEDED = "SUPERSEDED"
 
 @dataclass(frozen=True)
 class RunHandle:
-    """RunHandle：本文件定义的数据结构或组件。"""
     run_id: str
     status: str
     created_at: str
 
 
 def start_run(store: Neo4jStore, *, settings_snapshot: dict, notes: str = "") -> RunHandle:
-    """Create a BUILDING run carrying the full config snapshot (SKILL §5.1)."""
+    """Create a BUILDING run carrying the full config snapshot."""
     run_id = new_run_id()
     created_at = datetime.now(timezone.utc).isoformat()
     store.run(
@@ -61,7 +60,7 @@ def get_active_run(store: Neo4jStore) -> str | None:
 
 
 def graph_revision(store: Neo4jStore) -> str:
-    """Cache-invalidation token (设计 §2.2.2-D).
+    """Cache-invalidation token.
 
     **不得用节点数**：改名、改别名、改证据时节点数可能不变。这里用
     active_run_id + 该 run 下断言数与最新写入时间的组合。
@@ -80,70 +79,71 @@ def graph_revision(store: Neo4jStore) -> str:
     return f"{row['run_id']}:{row['assertions']}:{row['last_write'] or row['run_created']}"
 
 
-def mark_failed(store: Neo4jStore, run_id: str, reason: str) -> None:
-    """Mark a run FAILED; the previous ACTIVE run keeps serving."""
-    store.run(
+def _lock_run(tx, run_id: str, allowed: set[str]):
+    row = tx.run(
         "MATCH (r:IngestRun {run_id: $run_id}) "
-        "SET r.status = $status, r.failed_reason = $reason, r.finished_at = $now",
-        run_id=run_id, status=FAILED, reason=reason,
-        now=datetime.now(timezone.utc).isoformat(),
-    )
+        "SET r.write_lock = coalesce(r.write_lock, 0) + 1 RETURN r.status AS status",
+        run_id=run_id,
+    ).single()
+    if row is None:
+        raise RunStateError(f"IngestRun 不存在: {run_id}")
+    if row["status"] not in allowed:
+        raise RunStateError(f"批次状态 {row['status']} 不允许此操作")
+
+
+def mark_failed(store: Neo4jStore, run_id: str, reason: str) -> None:
+    """Fail an unfinished build; never demote a published version."""
+    def fail(tx):
+        _lock_run(tx, run_id, {BUILDING})
+        tx.run(
+            "MATCH (r:IngestRun {run_id: $run_id}) "
+            "SET r.status = $status, r.failed_reason = $reason, r.finished_at = $now",
+            run_id=run_id, status=FAILED, reason=reason,
+            now=datetime.now(timezone.utc).isoformat(),
+        ).consume()
+
+    with store.session() as session:
+        session.execute_write(fail)
+
+
+def _switch_active(
+    store: Neo4jStore, run_id: str, *, allowed: set[str], quality_report: dict | None
+) -> None:
+    from .indexes import PUBLICATION_LOCK_CONSTRAINT
+
+    # Also supports existing databases created before this constraint was introduced.
+    store.run(PUBLICATION_LOCK_CONSTRAINT)
+
+    def switch(tx):
+        tx.run(
+            "MERGE (p:GraphPublication {name: 'serving'}) "
+            "SET p.revision = coalesce(p.revision, 0) + 1"
+        ).consume()
+        _lock_run(tx, run_id, allowed)
+        now = datetime.now(timezone.utc).isoformat()
+        tx.run(
+            "MATCH (old:IngestRun {status: 'ACTIVE'}) WHERE old.run_id <> $run_id "
+            "SET old.status = $superseded, old.superseded_at = $now",
+            run_id=run_id, superseded=SUPERSEDED, now=now,
+        ).consume()
+        tx.run(
+            "MATCH (target:IngestRun {run_id: $run_id}) "
+            "SET target.status = $active, target.activated_at = $now "
+            "SET target.quality_json = coalesce($quality, target.quality_json)",
+            run_id=run_id, active=ACTIVE, now=now,
+            quality=(json.dumps(quality_report, ensure_ascii=False, sort_keys=True)
+                     if quality_report is not None else None),
+        ).consume()
+
+    with store.session() as session:
+        session.execute_write(switch)
 
 
 def activate(store: Neo4jStore, run_id: str, *, quality_report: dict) -> None:
-    """Atomically switch `run_id` to ACTIVE and demote the previous one.
-
-    Args:
-        store: 连接句柄。
-        run_id: 必须处于 BUILDING 状态。
-        quality_report: 发布门槛检查结果，随 run 一起留档（设计 §9.3）。
-
-    Raises:
-        RunStateError: run 不存在或不处于 BUILDING。
-
-    Side effects: 单条语句内完成降级 + 升级，避免出现零个或两个 ACTIVE。
-    """
-    rows = store.run(
-        "MATCH (r:IngestRun {run_id: $run_id}) RETURN r.status AS status", run_id=run_id
-    )
-    if not rows:
-        raise RunStateError(f"IngestRun 不存在: {run_id}")
-    if rows[0]["status"] != BUILDING:
-        raise RunStateError(f"只能激活 BUILDING 状态的 run，当前为 {rows[0]['status']}")
-
-    store.run(
-        """
-        MATCH (target:IngestRun {run_id: $run_id})
-        WITH target
-        OPTIONAL MATCH (old:IngestRun {status: 'ACTIVE'}) WHERE old.run_id <> $run_id
-        SET old.status = $superseded, old.superseded_at = $now
-        WITH target
-        SET target.status = $active, target.activated_at = $now,
-            target.quality_json = $quality
-        """,
-        run_id=run_id, active=ACTIVE, superseded=SUPERSEDED,
-        now=datetime.now(timezone.utc).isoformat(),
-        quality=json.dumps(quality_report, ensure_ascii=False, sort_keys=True),
-    )
+    """Publish a BUILDING run under a database-wide publication lock."""
+    _switch_active(store, run_id, allowed={BUILDING}, quality_report=quality_report)
 
 
 def rollback_to(store: Neo4jStore, run_id: str) -> None:
-    """Re-activate a previously superseded run (回滚)."""
-    rows = store.run(
-        "MATCH (r:IngestRun {run_id: $run_id}) RETURN r.status AS status", run_id=run_id
-    )
-    if not rows:
-        raise RunStateError(f"IngestRun 不存在: {run_id}")
-    if rows[0]["status"] not in {SUPERSEDED, ACTIVE}:
-        raise RunStateError(f"只能回滚到 SUPERSEDED/ACTIVE 的 run，当前为 {rows[0]['status']}")
-    store.run(
-        """
-        MATCH (old:IngestRun {status: 'ACTIVE'}) WHERE old.run_id <> $run_id
-        SET old.status = $superseded, old.superseded_at = $now
-        WITH 1 AS _
-        MATCH (target:IngestRun {run_id: $run_id})
-        SET target.status = $active, target.activated_at = $now
-        """,
-        run_id=run_id, active=ACTIVE, superseded=SUPERSEDED,
-        now=datetime.now(timezone.utc).isoformat(),
-    )
+    """Restore a retained version, including when no run is currently ACTIVE."""
+    _switch_active(store, run_id, allowed={SUPERSEDED, ACTIVE}, quality_report=None)

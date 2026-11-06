@@ -1,4 +1,4 @@
-"""Threshold calibration curve (设计 §2.1.2-E).
+"""Threshold calibration curve.
 
 阈值必须通过开发集标定后再冻结，不能把初始值直接写进报告结论。
 断言已带 final_score，本脚本离线扫描接受阈值，无需重跑抽取、不调用 LLM。
@@ -37,7 +37,6 @@ ORDER BY c.index
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Calibrate the acceptance threshold")
     parser.add_argument("--run", default=None)
@@ -91,7 +90,7 @@ def main() -> int:
         print()
         print("读法：Prec 是下界（图谱含字段外的正确事实），因此曲线只能用于")
         print("**相对比较**——看阈值变化带来的增减，不能把绝对值当准确率。")
-        print("建图取向是 Precision 优先（设计 §2.1.1-2），若要提高精确率，")
+        print("建图取向是 Precision 优先，若要提高精确率，")
         print("应选 Recall 开始明显下滑之前的最大阈值。")
 
         if args.json:

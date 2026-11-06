@@ -1,4 +1,4 @@
-"""高风险链路验收测试：从请求到响应（任务书 §11）。
+"""高风险链路验收测试：从请求到响应。
 
 每个用例都走完整的 `HighRiskService.answer`：
 读取 → 条件单元 → 候选结论 → 程序核验 → 状态 → 渲染。
@@ -63,7 +63,6 @@ def linked_herb(name: str = "麻黄", canonical_id: str = MAHUANG) -> list[dict]
 
 # ---------------------------------------------------------------- 场景 1
 def test_01_plain_dosage_is_grounded():
-    """测试：纯剂量为有证据支撑。"""
     rows = [dosage_row("a1", "煎服，3～9g。", quote="麻黄煎服，3～9g。")]
     answer = service_for(rows).answer("麻黄用量是多少？", linked_entities=linked_herb())
 
@@ -78,7 +77,6 @@ def test_01_plain_dosage_is_grounded():
 
 # ---------------------------------------------------------------- 场景 2
 def test_02_two_routes_in_one_clause_stay_separate():
-    """测试：两路由到在同一分句保持分开。"""
     text = "煎服，3～9g；挽救虚脱可用 15～30g。"
     rows = [dosage_row("a1", text, quote=text)]
     answer = service_for(rows).answer("麻黄用量是多少？", linked_entities=linked_herb())
@@ -95,7 +93,6 @@ def test_02_two_routes_in_one_clause_stay_separate():
 
 # ---------------------------------------------------------------- 场景 3
 def test_03_preparation_specific_dosages_are_not_interchangeable():
-    """测试：炮制/剂型特定剂量不可互换。"""
     text = "生品 1.5～3g，制品 3～6g。"
     rows = [dosage_row("a1", text, quote=text)]
     answer = service_for(rows).answer("麻黄用量是多少？", linked_entities=linked_herb())
@@ -110,7 +107,6 @@ def test_03_preparation_specific_dosages_are_not_interchangeable():
 
 # ---------------------------------------------------------------- 场景 4
 def test_04_inverted_range_is_marked_not_swapped():
-    """测试：颠倒的区间为被标记不被对调。"""
     rows = [dosage_row("a1", "9～3g", quote="麻黄 9～3g。")]
     answer = service_for(rows).answer("麻黄用量是多少？", linked_entities=linked_herb())
 
@@ -126,7 +122,6 @@ def test_04_inverted_range_is_marked_not_swapped():
 
 # ---------------------------------------------------------------- 场景 6
 def test_06_severity_degrees_are_not_collapsed():
-    """测试：严重程度档位不被合并掉。"""
     rows = [
         assertion_row(
             assertion_id="a1", predicate="CONTRAINDICATED_IN", polarity="NEGATIVE",
@@ -152,7 +147,6 @@ def test_06_severity_degrees_are_not_collapsed():
 
 # ---------------------------------------------------------------- 场景 7
 def test_07_incompatibility_negation_scope_is_preserved():
-    """测试：配伍禁忌否定作用范围为得到保留。"""
     rows = [
         assertion_row(
             assertion_id="a1", predicate="INCOMPATIBLE_WITH", polarity="NEGATIVE",
@@ -174,7 +168,6 @@ def test_07_incompatibility_negation_scope_is_preserved():
 
 # ---------------------------------------------------------------- 场景 8
 def test_08_use_restriction_negation_scope_is_preserved():
-    """测试：使用限制否定作用范围为得到保留。"""
     rows = [
         assertion_row(
             assertion_id="a1", predicate="CONTRAINDICATED_IN", polarity="NEGATIVE",
@@ -192,7 +185,6 @@ def test_08_use_restriction_negation_scope_is_preserved():
 
 # ---------------------------------------------------------------- 场景 5 / 15
 def test_05_no_evidence_never_becomes_safe():
-    """测试：没有证据绝不变成安全。"""
     answer = service_for([]).answer("麻黄孕妇能用吗？", linked_entities=linked_herb())
 
     assert answer.status is AnswerStatus.ABSTAIN
@@ -208,7 +200,6 @@ def test_05_no_evidence_never_becomes_safe():
 
 
 def test_15_abstain_on_unresolvable_subject():
-    """测试：拒答当无法消歧的主语。"""
     answer = service_for([]).answer("这个药怎么用？", linked_entities=[])
 
     assert answer.status is AnswerStatus.ABSTAIN
@@ -219,7 +210,6 @@ def test_15_abstain_on_unresolvable_subject():
 
 # ---------------------------------------------------------------- 场景 9 / 16
 def test_09_fabricated_evidence_reference_is_a_hard_failure():
-    """测试：伪造的证据引用为硬性失败。"""
     text = "煎服，3～9g。"
     rows = [dosage_row("a1", text, quote=text)]
     fabricated = CandidateClaim(
@@ -242,7 +232,6 @@ def test_09_fabricated_evidence_reference_is_a_hard_failure():
 
 
 def test_16_model_self_assessment_cannot_overturn_hard_failure():
-    """测试：模型自我自评不能推翻硬性失败。"""
     text = "煎服，3～9g。"
     rows = [dosage_row("a1", text, quote=text)]
     unit_id = service_for(rows).answer(
@@ -275,7 +264,6 @@ def test_16_model_self_assessment_cannot_overturn_hard_failure():
 
 # ---------------------------------------------------------------- 场景 10
 def test_10_numbers_present_but_bound_wrong():
-    """测试：数字出现但约束错误。"""
     text = "生品 1.5～3g，制品 3～6g。"
     rows = [dosage_row("a1", text, quote=text)]
     units = service_for(rows).answer(
@@ -310,7 +298,6 @@ def test_10_numbers_present_but_bound_wrong():
 
 # ---------------------------------------------------------------- 场景 11
 def test_11_missing_required_condition_is_rejected():
-    """测试：缺失必需条件为被拒绝。"""
     text = "生品 1.5～3g，制品 3～6g。"
     rows = [dosage_row("a1", text, quote=text)]
     units = service_for(rows).answer(
@@ -337,7 +324,6 @@ def test_11_missing_required_condition_is_rejected():
 
 # ---------------------------------------------------------------- 场景 12
 def test_12_general_dosage_not_pushed_to_children():
-    """测试：通用剂量不套用到儿童。"""
     text = "煎服，3～9g。"
     rows = [dosage_row("a1", text, quote=text)]
     unit_id = service_for(rows).answer(
@@ -363,7 +349,6 @@ def test_12_general_dosage_not_pushed_to_children():
 
 # ---------------------------------------------------------------- 场景 13
 def test_13_compound_question_partially_grounded():
-    """测试：复合问题部分有证据支撑。"""
     rows = [dosage_row("a1", "煎服，3～9g。", quote="麻黄煎服，3～9g。")]
     answer = service_for(rows).answer(
         "麻黄用量是多少？孕妇能用吗？", linked_entities=linked_herb()
@@ -383,7 +368,6 @@ def test_13_compound_question_partially_grounded():
 
 # ---------------------------------------------------------------- 场景 14
 def test_14_unit_mismatch_is_rejected():
-    """测试：单位不一致为被拒绝。"""
     text = "煎服，3～9g。"
     rows = [dosage_row("a1", text, quote=text)]
     unit_id = service_for(rows).answer(
@@ -409,7 +393,6 @@ def test_14_unit_mismatch_is_rejected():
 
 # ---------------------------------------------------------------- 读取限定
 def test_read_is_scoped_by_run_and_limit():
-    """测试：读取为限定范围按run且上限。"""
     rows = [dosage_row("a1", "煎服，3～9g。", quote="麻黄煎服，3～9g。")]
     store = FakeHighRiskStore(rows)
     HighRiskService(store, run_id="run-test").answer(

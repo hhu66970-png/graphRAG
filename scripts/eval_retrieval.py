@@ -19,7 +19,6 @@ from graphragexpr.evaluation.retrieval_eval import (
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--predictions", type=Path)

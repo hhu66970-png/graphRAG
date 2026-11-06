@@ -4,7 +4,6 @@ from graphragexpr.retrieval.comparison import reduce_section_summaries
 
 
 def test_section_map_reduce_keeps_both_entities_and_source_spans():
-    """测试：章节映射归约保留两个实体且来源跨度。"""
     rows = [
         {
             "entity_id": "HERB:renshen",

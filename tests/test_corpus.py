@@ -9,7 +9,6 @@ from corpus import load_chunk_records
 
 
 def test_chunk_records_keep_page_and_section(tmp_path):
-    """测试：文本块记录保留页码且章节。"""
     corpus = tmp_path / "book.md"
     corpus.write_text(
         """# 中药学
@@ -35,7 +34,6 @@ def test_chunk_records_keep_page_and_section(tmp_path):
 
 
 def test_chunk_limit(tmp_path):
-    """测试：文本块上限。"""
     corpus = tmp_path / "book.md"
     corpus.write_text("<!-- source-page: 1 -->\n\n" + "中药具有功效。" * 100, encoding="utf-8")
     records = load_chunk_records(corpus, chunk_size=80, overlap=10, max_chunks=2)

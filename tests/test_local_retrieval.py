@@ -4,7 +4,6 @@ from graphragexpr.local_retrieval import rank_chunks
 
 
 def test_definition_question_prefers_definition_chunk():
-    """测试：定义问题更倾向定义文本块。"""
     chunks = [
         {
             "index": 0,

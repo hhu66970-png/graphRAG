@@ -1,4 +1,4 @@
-# import_kg_bundle.ps1
+﻿# import_kg_bundle.ps1
 # 把离线 zip 导入本机 Neo4j，免 OCR、免重新抽取全书。
 
 param(

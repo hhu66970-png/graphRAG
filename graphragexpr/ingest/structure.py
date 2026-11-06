@@ -1,4 +1,4 @@
-"""Herb-entry structure detection (设计 §2.1.2-D 的前置条件).
+"""Herb-entry structure detection.
 
 跨块补全的主依据是 `entry_id` 而非「相邻块」。本模块从《中药学》OCR 文本中识别
 药物条目边界，为每个 Chunk 赋予稳定的 `entry_id`。
@@ -15,7 +15,7 @@
 其中「药名换行后接拼音 + （《典籍》）」这一行是可靠的条目起始标记：
 中文正文里几乎不会出现「拉丁字母串紧跟书名号左括号」的组合。
 
-本模块属 ingest 层，只做结构解析，不调用 Neo4j、不调用 LLM（SKILL §5.3）。
+本模块属 ingest 层，只做结构解析，不调用 Neo4j、不调用 LLM。
 """
 
 from __future__ import annotations

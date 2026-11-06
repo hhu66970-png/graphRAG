@@ -1,17 +1,17 @@
-"""I1 entity linking and alias normalisation (设计 §2.1.1-1).
+"""I1 entity linking and alias normalisation.
 
 分层流程：文本规范化 → 权威别名精确匹配 → 包含式候选 → 字符候选 → 向量候选
 → 类型与上下文确认。比「按 embedding 阈值直接合并」安全得多，尤其适合
 「人参 / 红参 / 生晒参」这类**有关联但不等价**的实体。
 
 三条不可违反的规则：
-  1. 身份是 canonical_id，不是 name（SKILL §3.3）。
+  1. 身份是 canonical_id，不是 name。
   2. **绝不跨实体类型合并**——旧图 506 个名字同时挂在多个类型下，正是无类型
      匹配造成的；本模块所有候选召回都先按 entity_type 分桶。
   3. **除第 1 层精确匹配外，任何层都只产生候选，不得自动合并**。
      曾因「最长匹配」层做包含式自动合并，导致 麻黄→麻黄根、黄连→胡黄连、
      沙参→南沙参 等错误归并（麻黄发汗、麻黄根止汗，功效相反）。
-向量阈值同样只能生成候选，不能直接确认同一实体（设计 §2.2.3）。
+向量阈值同样只能生成候选，不能直接确认同一实体。
 """
 
 from __future__ import annotations
@@ -91,7 +91,6 @@ class AliasStore:
 
 @dataclass(frozen=True)
 class LinkDecision:
-    """LinkDecision：本文件定义的数据结构或组件。"""
     record: EntityRecord
     is_new: bool
     candidates: tuple[tuple[str, float], ...] = ()
@@ -106,7 +105,6 @@ class EntityResolver:
         settings: KGSettings,
         vector_candidates: VectorCandidateProvider | None = None,
     ) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._store = store
         self._settings = settings
         self._vector_candidates = vector_candidates
@@ -138,14 +136,14 @@ class EntityResolver:
         # 第 2 层：包含式匹配 —— **只生成候选，绝不自动合并**。
         # 中文药名里一个字的前后缀常常就换了物种或药用部位：
         # 麻黄(发汗) / 麻黄根(止汗)、黄连(Coptis) / 胡黄连(Picrorhiza)、
-        # 沙参 / 南沙参、防已 / 广防已。设计 §2.1.1-1 的流程本就要求候选经
+        # 沙参 / 南沙参、防已 / 广防已。候选还需经过
         # 「类型与上下文确认」，这里按长度比给分，交由下面的阈值裁决。
         containment_candidates = self._containment_candidates(entity_type, normalized)
 
         # 第 3 层：字符候选（受限编辑距离），同样只做候选
         char_candidates = self._character_candidates(entity_type, normalized)
 
-        # 第 4 层：向量候选，同样只做候选（设计 §2.2.3）
+        # 第 4 层：向量候选，同样只做候选
         vector_candidates: list[tuple[str, float]] = []
         if self._vector_candidates is not None:
             vector_candidates = self._vector_candidates(

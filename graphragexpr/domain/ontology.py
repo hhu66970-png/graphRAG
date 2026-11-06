@@ -1,4 +1,4 @@
-"""Controlled ontology loader and validator (SKILL §3.4).
+"""Controlled ontology loader and validator.
 
 唯一事实源是 ontology.yaml。本模块只负责加载、校验与查询，不得内联任何
 硬编码的类型或关系清单。
@@ -24,7 +24,6 @@ ONTOLOGY_PATH = Path(__file__).with_name("ontology.yaml")
 
 @dataclass(frozen=True)
 class Predicate:
-    """Predicate：本文件定义的数据结构或组件。"""
     id: str
     display: str
     domain: tuple[str, ...]
@@ -37,7 +36,6 @@ class Ontology:
     """Immutable view over ontology.yaml."""
 
     def __init__(self, raw: dict) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.schema_version: str = raw["schema_version"]
         self.entity_types: dict[str, dict] = raw["entity_types"]
         self.value_object_types: dict[str, dict] = raw.get("value_object_types", {})
@@ -83,7 +81,7 @@ class Ontology:
     def resolve_entity_type(self, raw: str, *, allow_legacy: bool = True) -> str:
         """Resolve an entity type ID, raising on unknown input.
 
-        SKILL §3.4：未知类型必须记录并拒绝，**不得统一降级为「概念」**。
+        未知类型必须记录并拒绝，**不得统一降级为「概念」**。
         """
         value = (raw or "").strip()
         if value in self.entity_types or value in self.value_object_types:

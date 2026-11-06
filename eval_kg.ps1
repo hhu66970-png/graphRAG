@@ -1,9 +1,7 @@
 ﻿# eval_kg.ps1
 # 跑抽取质量评测，并可选做阈值标定。
 
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "KG Extraction Evaluation" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $env:PYTHONIOENCODING = "utf-8"

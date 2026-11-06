@@ -5,6 +5,7 @@ Tests for RAG retrieval components
 import pytest
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "graphragexpr"))
 
@@ -16,43 +17,55 @@ pytestmark = pytest.mark.integration
 class TestRetrieval:
     """Test suite for RAG retrieval"""
 
-    def test_vector_index_creation(self, neo4j_driver, clean_database):
+    def test_vector_index_creation(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test creating vector index"""
         from neo4j_graphrag.indexes import create_vector_index
 
-        embedder = SimpleHashEmbedder(dimension=128)
-        embedding = embedder.embed_query("test")
+        token = uuid4().hex
+        label = f"ITestRetrievalVector_{token}"
+        index_name = f"itest_retrieval_vector_{token}"
+        database = neo4j_test_config["database"]
+        embedding = SimpleHashEmbedder(dimension=128).embed_query("test")
 
-        with neo4j_driver.session() as session:
-            # Create a chunk with embedding
-            session.run("""
-                CREATE (c:Chunk {id: 'test', text: 'test', embedding: $embedding})
-            """, embedding=embedding)
-
-        # Create vector index
         try:
+            with neo4j_driver.session(database=database) as session:
+                # These identifiers contain only the fixed prefix and a generated UUID.
+                session.run(
+                    f"CREATE (c:`{label}` {{text: 'test', embedding: $embedding}})",
+                    embedding=embedding,
+                ).consume()
             create_vector_index(
                 neo4j_driver,
-                name="test_embeddings",
-                label="Chunk",
+                name=index_name,
+                label=label,
                 embedding_property="embedding",
                 dimensions=128,
                 similarity_fn="cosine",
+                fail_if_exists=True,
+                neo4j_database=database,
             )
-        except Exception as e:
-            if "already exists" not in str(e).lower():
-                raise
+            with neo4j_driver.session(database=database) as session:
+                session.run("CALL db.awaitIndex($name, 30)", name=index_name).consume()
+                index = session.run(
+                    "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options "
+                    "WHERE name = $name RETURN type, entityType, labelsOrTypes, properties, options",
+                    name=index_name,
+                ).single()
+                assert index is not None
+                assert index["type"] == "VECTOR"
+                assert index["entityType"] == "NODE"
+                assert index["labelsOrTypes"] == [label]
+                assert index["properties"] == ["embedding"]
+                config = index["options"]["indexConfig"]
+                assert config["vector.dimensions"] == 128
+                assert config["vector.similarity_function"].lower() == "cosine"
+        finally:
+            with neo4j_driver.session(database=database) as session:
+                session.run(f"DROP INDEX `{index_name}` IF EXISTS").consume()
 
-        # Verify index exists
-        with neo4j_driver.session() as session:
-            result = session.run("SHOW INDEXES")
-            indexes = [record["name"] for record in result]
-            # Index might be created with different name or already exist
-            assert len(indexes) > 0  # At least some indexes exist
-
-    def test_cypher_reduce_function(self, neo4j_driver, clean_database):
+    def test_cypher_reduce_function(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test the reduce function used in retrieval query"""
-        with neo4j_driver.session() as session:
+        with neo4j_driver.session(database=neo4j_test_config["database"]) as session:
             # Test reduce for text joining
             result = session.run("""
                 WITH ['text1', 'text2', 'text3'] AS texts
@@ -64,12 +77,12 @@ class TestRetrieval:
             joined = result.single()["joined"]
             assert joined == "text1, text2, text3"
 
-    def test_graph_traversal_query(self, neo4j_driver, clean_database):
+    def test_graph_traversal_query(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test graph traversal for RAG retrieval"""
         embedder = SimpleHashEmbedder(dimension=128)
         embedding = embedder.embed_query("test text")
 
-        with neo4j_driver.session() as session:
+        with neo4j_driver.session(database=neo4j_test_config["database"]) as session:
             # Create knowledge graph structure
             session.run("""
                 CREATE (c:Chunk {text: '人参具有大补元气的功效', embedding: $embedding})
@@ -88,12 +101,12 @@ class TestRetrieval:
             entities = {record["name"] for record in result if record["name"]}
             assert "大补元气" in entities
 
-    def test_retrieval_query_format(self, neo4j_driver, clean_database):
+    def test_retrieval_query_format(self, neo4j_driver, clean_database, neo4j_test_config):
         """Test the complete retrieval query format"""
         embedder = SimpleHashEmbedder(dimension=128)
         embedding = embedder.embed_query("人参")
 
-        with neo4j_driver.session() as session:
+        with neo4j_driver.session(database=neo4j_test_config["database"]) as session:
             # Setup test data
             session.run("""
                 CREATE (c:Chunk {text: '人参具有大补元气的功效', embedding: $embedding})

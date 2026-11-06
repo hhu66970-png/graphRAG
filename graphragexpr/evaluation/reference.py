@@ -1,4 +1,4 @@
-"""Structured-field reference set parsed from the textbook itself (设计 §9.1).
+"""Structured-field reference set parsed from the textbook itself.
 
 《中药学》每味药的条目都有高度规整的结构化字段：
 
@@ -10,7 +10,7 @@
 因此可作为抽取质量的参照基准。
 
 **必须说清楚它不是什么**：这是「教材结构化字段参照集」，
-不是设计 §9.1 要求的「双人标注并仲裁的金标准集」。两点差别：
+不是要求的「双人标注并仲裁的金标准集」。两点差别：
 
 1. 覆盖面窄：只覆盖 药性/功效/用法用量 三类字段，不含主治、配伍、禁忌等；
 2. **Precision 会被低估**：图谱里合理地包含字段之外的事实（【应用】段落、

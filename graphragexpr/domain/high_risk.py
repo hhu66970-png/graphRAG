@@ -1,11 +1,10 @@
 """高风险领域的类型化词汇表：风险类别、限制程度、条件证据单元。
 
-任务范围只覆盖三类关系（`HAS_DOSAGE` / `CONTRAINDICATED_IN` / `INCOMPATIBLE_WITH`），
+支持三类关系（`HAS_DOSAGE` / `CONTRAINDICATED_IN` / `INCOMPATIBLE_WITH`），
 本模块是这三类关系在「读取 → 条件组织 → 核验」全链路上共用的数据契约。
-放在 `domain/` 是因为存储层、风险服务层与接口层必须对同一组字段达成一致
-（SKILL §5.2：domain 是 Pydantic 模型的唯一事实源）。
+放在 `domain/` 是因为存储层、风险服务层与接口层必须对同一组字段达成一致。
 
-设计约束（来自本次开发任务书 §5）：
+条件单元的约束：
 
 1. 同段原文出现多种用法或不同生制品对应不同剂量时，**生成多个分别绑定条件的单元**；
    严禁从整段不同位置各取一个数字、单位、用法再拼成一条事实。
@@ -22,8 +21,8 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# 本次任务限定的三类高风险谓词。不从本体全量 high_risk 推导，
-# 避免未来新增高风险谓词时静默扩大本模块的处理范围（任务书 §1）。
+# 当前支持的三类高风险谓词。不从本体全量 high_risk 推导，
+# 避免未来新增高风险谓词时静默扩大本模块的处理范围。
 TASK_HIGH_RISK_PREDICATES: tuple[str, ...] = (
     "HAS_DOSAGE",
     "CONTRAINDICATED_IN",
@@ -55,7 +54,7 @@ CATEGORY_DISPLAY: dict[RiskCategory, str] = {
 class RestrictionSeverity(str, Enum):
     """禁忌的限制程度。
 
-    任务书 §5 要求保留「禁用 / 忌用 / 慎用」的区别，
+    要求保留「禁用 / 忌用 / 慎用」的区别，
     **不能用同一个布尔值抹平**——三者在临床含义上并不等价。
     """
 
@@ -74,14 +73,14 @@ SEVERITY_DISPLAY: dict[RestrictionSeverity, str] = {
 
 
 class SourceKind(str, Enum):
-    """证据来源类型。原文来源**不得**被升级为通过断言（任务书 §4）。"""
+    """证据来源类型。原文来源**不得**被升级为通过断言。"""
 
     ASSERTION = "ASSERTION"      # 来自校验通过的断言
     TEXT_CHUNK = "TEXT_CHUNK"    # 仅来自教材原文，独立核验后使用
 
 
 class PolarityVerdict(str, Enum):
-    """旧极性的服务侧解释结果（任务书 §4）。
+    """旧极性的服务侧解释结果。
 
     「甲药不能与乙药同用」：对「同用」是否定，对「配伍禁忌」关系是**肯定**。
     因此原始极性与关系是否成立必须分开记录，不能混为一谈。
@@ -93,7 +92,7 @@ class PolarityVerdict(str, Enum):
 
 
 class AnswerStatus(str, Enum):
-    """高风险回答的状态分级（任务书 §6）。"""
+    """高风险回答的状态分级。"""
 
     GROUNDED = "grounded"
     PARTIAL_GROUNDED = "partial_grounded"
@@ -103,7 +102,7 @@ class AnswerStatus(str, Enum):
 
 #: 顶层 abstained 字段的映射：只有 grounded 表示「用户所问的关键高风险结论全部给出」。
 #: 逐子问题状态另行保存在 sub_questions 中，前端不得因顶层 abstained=true
-#: 而隐藏已支持的结论或可信原文（任务书 §6）。
+#: 而隐藏已支持的结论或可信原文。
 ABSTAINED_BY_STATUS: dict[AnswerStatus, bool] = {
     AnswerStatus.GROUNDED: False,
     AnswerStatus.PARTIAL_GROUNDED: True,
@@ -121,7 +120,7 @@ class _Base(BaseModel):
 class FieldSpan(_Base):
     """关键字段在原文中的字符跨度。
 
-    任务书 §5 要求「每组关键字段支持的原文位置」可核对，因此每个关键槽位
+    要求「每组关键字段支持的原文位置」可核对，因此每个关键槽位
     单独记录跨度，而不是只记录整句位置。
     """
 
@@ -142,11 +141,11 @@ class DosageBinding(_Base):
 
     与旧版 `DosageValue` 的区别：
 
-    - `is_inverted` 只做标记，**不修正**（任务书 §5.2 禁止倒置范围修正）。
+    - `is_inverted` 只做标记，**不修正**。
       是否为 OCR 错误交由核验与人工判断，程序不得擅自交换上下界。
     - 单位只允许在同一条件片段内配对，不做整段搜索补单位。
     - `span` 记录该数值在原文中的位置，使「数字确实出现在原文」与
-      「数字与本单位匹配」成为两个可分别检查的条件（任务书 §6）。
+      「数字与本单位匹配」成为两个可分别检查的条件。
     """
 
     raw: str
@@ -174,7 +173,7 @@ class DosageBinding(_Base):
 
 
 class ConditionalEvidenceUnit(_Base):
-    """类型化的高风险条件证据单元（任务书 §5 的核心新增能力）。
+    """类型化的高风险条件证据单元。
 
     借鉴 FHIR `Dosage` 对「剂量 / 途径 / 时间安排 / 补充说明 / 自由文本并存」的
     组织思路，并加入中药特有的生制品与来源追溯。**只借鉴数据组织方式**，
@@ -215,7 +214,7 @@ class ConditionalEvidenceUnit(_Base):
     validation_status: str | None = None
     is_cross_chunk: bool = False
 
-    # ---- 极性：原始值与被解释值分开保存（任务书 §4）----------------------
+    # ---- 极性：原始值与被解释值分开保存----------------------
     raw_polarity: str | None = None
     polarity_verdict: PolarityVerdict = PolarityVerdict.UNDETERMINED
     polarity_basis: str = ""
@@ -249,7 +248,7 @@ class ConditionalEvidenceUnit(_Base):
         if self.source_kind is SourceKind.TEXT_CHUNK and self.assertion_id:
             raise ValueError(
                 "TEXT_CHUNK 来源的单元不得携带 assertion_id："
-                "原文证据不能被冒充为通过断言（任务书 §4）"
+                "原文证据不能被冒充为通过断言"
             )
         return self
 
@@ -277,5 +276,5 @@ class ConditionalEvidenceUnit(_Base):
 
 
 def category_of(predicate: str) -> RiskCategory | None:
-    """本任务范围内的谓词映射；范围外谓词返回 None（不静默扩大处理范围）。"""
+    """支持范围内的谓词映射；范围外谓词返回 None（不静默扩大处理范围）。"""
     return PREDICATE_CATEGORY.get(predicate)

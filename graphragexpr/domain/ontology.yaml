@@ -1,9 +1,9 @@
-# 《中药学》受控本体 —— SKILL §3.4 唯一事实源
+# 《中药学》受控本体：实体类型、关系与值对象定义
 # 规则：
 #   - 实体类型与关系 ID 只能从本文件读取，LLM 不得自由创建正式标签或关系类型。
 #   - 每个关系必须定义 domain/range、中文展示名、是否高风险、允许的限定符。
 #   - 未知类型或非法起止类型必须记录并拒绝，不得统一降级为「概念」。
-# 任何改动都属于契约变更，必须升 schema_version 并写 ADR（SKILL §15）。
+# 修改类型或关系定义时同步更新 schema_version。
 
 schema_version: "kg-ontology-1.0.0"
 
@@ -23,7 +23,7 @@ entity_types:
   PERSON:          {display: 人物,     description: 医家人物}
   CONCEPT:         {display: 概念,     description: 理论概念；仅用于确实无法归入上述类型者}
 
-# 值对象：不建独立实体身份，作为 Assertion.object_value 保存（设计文档 §2.1.2-C）
+# 值对象：不建独立实体身份，作为 Assertion.object_value 保存
 value_object_types:
   DOSAGE:
     display: 用法用量
@@ -109,7 +109,7 @@ predicates:
     high_risk: false
     qualifiers: []
 
-# 旧图关系名 → 稳定谓词 ID。仅用于迁移与兼容读取（设计文档 §2.2.2-B）。
+# 旧图关系名 → 稳定谓词 ID。仅用于迁移与兼容读取。
 # 新抽取不得依赖本表：LLM 只能输出上面的稳定 ID。
 legacy_relation_aliases:
   具有功效: HAS_EFFICACY

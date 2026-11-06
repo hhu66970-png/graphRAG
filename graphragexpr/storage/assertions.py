@@ -1,10 +1,10 @@
-"""Assertion / Evidence graph writes — the fact source (设计 §4.1, SKILL §3.2).
+"""Assertion / Evidence graph writes — the fact source.
 
 事实源是 Assertion，而不是实体间直接边。每条 ACCEPTED 断言都必须带
 chunk_ids、页码与可定位 evidence_quote；同一事实可以有多条断言/证据，
 冲突事实不互相覆盖。
 
-所有写入按 UNWIND 批量执行且幂等（SKILL §9.2 / §5.5）。
+所有写入按 UNWIND 批量执行且幂等。
 """
 
 from __future__ import annotations
@@ -12,13 +12,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Sequence
 
+from ..domain.ids import assertion_version_id
 from ..domain.models import AssertionRecord, ChunkRecord, EntityRecord
 from .neo4j_store import Neo4jStore
+from .runs import BUILDING, _lock_run
 
 _UPSERT_ENTITIES = """
 UNWIND $batch AS row
 MERGE (e:Entity {canonical_id: row.canonical_id})
-SET e.entity_type      = row.entity_type,
+ON CREATE SET e.entity_type      = row.entity_type,
     e.preferred_name   = row.preferred_name,
     e.normalized_name  = row.normalized_name,
     e.aliases          = row.aliases,
@@ -27,12 +29,16 @@ SET e.entity_type      = row.entity_type,
     e.link_method      = row.link_method,
     e.review_status    = row.review_status,
     e.run_id           = row.run_id
+WITH e, row
+MATCH (r:IngestRun {run_id: row.run_id})
+MERGE (e)-[membership:IN_RUN]->(r)
+SET membership.aliases = row.aliases
 """
 
 _UPSERT_CHUNKS = """
 UNWIND $batch AS row
 MERGE (c:Chunk {chunk_id: row.chunk_id})
-SET c.document_id      = row.document_id,
+ON CREATE SET c.document_id      = row.document_id,
     c.parent_chunk_id  = row.parent_chunk_id,
     c.entry_id         = row.entry_id,
     c.section_path     = row.section_path,
@@ -47,12 +53,16 @@ SET c.document_id      = row.document_id,
 WITH c, row
 MATCH (d:Document {document_id: row.document_id})
 MERGE (c)-[:PART_OF]->(d)
+WITH c, row
+MATCH (r:IngestRun {run_id: row.run_id})
+MERGE (c)-[:IN_RUN]->(r)
 """
 
 _UPSERT_ASSERTIONS = """
 UNWIND $batch AS row
 MERGE (a:Assertion {assertion_id: row.assertion_id})
-SET a.fact_key          = row.fact_key,
+SET a.source_assertion_id = row.source_assertion_id,
+    a.fact_key          = row.fact_key,
     a.predicate         = row.predicate,
     a.polarity          = row.polarity,
     a.qualifiers_json   = row.qualifiers_json,
@@ -91,14 +101,37 @@ MERGE (a)-[:IN_RUN]->(r)
 """
 
 
+def _write_build_rows(store: Neo4jStore, query: str, rows: list[dict], batch_size: int) -> int:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if not rows:
+        return 0
+
+    def write(tx):
+        for run_id in sorted({row["run_id"] for row in rows}):
+            _lock_run(tx, run_id, {BUILDING})
+        for start in range(0, len(rows), batch_size):
+            tx.run(query, batch=rows[start : start + batch_size]).consume()
+        return len(rows)
+
+    with store.session() as session:
+        return session.execute_write(write)
+
+
 def upsert_document(store: Neo4jStore, *, document_id: str, name: str, source: str, run_id: str) -> None:
-    """写入或更新 Document 节点。"""
-    store.run(
+    """Register an immutable source document in a build."""
+    _write_build_rows(
+        store,
         """
-        MERGE (d:Document {document_id: $document_id})
-        SET d.name = $name, d.source = $source, d.run_id = $run_id
+        UNWIND $batch AS row
+        MERGE (d:Document {document_id: row.document_id})
+        ON CREATE SET d.name = row.name, d.source = row.source, d.run_id = row.run_id
+        WITH d, row
+        MATCH (r:IngestRun {run_id: row.run_id})
+        MERGE (d)-[:IN_RUN]->(r)
         """,
-        document_id=document_id, name=name, source=source, run_id=run_id,
+        [{"document_id": document_id, "name": name, "source": source, "run_id": run_id}],
+        1,
     )
 
 
@@ -121,7 +154,7 @@ def upsert_entities(
         }
         for e in entities
     ]
-    return store.execute_batches(_UPSERT_ENTITIES, rows, batch_size=batch_size)
+    return _write_build_rows(store, _UPSERT_ENTITIES, rows, batch_size)
 
 
 def upsert_chunks(
@@ -146,7 +179,7 @@ def upsert_chunks(
         }
         for c in chunks
     ]
-    return store.execute_batches(_UPSERT_CHUNKS, rows, batch_size=batch_size)
+    return _write_build_rows(store, _UPSERT_CHUNKS, rows, batch_size)
 
 
 def upsert_assertions(
@@ -158,10 +191,11 @@ def upsert_assertions(
     now = datetime.now(timezone.utc).isoformat()
     rows = []
     for a in assertions:
-        a.assert_publishable()  # SKILL §3.1 硬门槛
+        a.assert_publishable()  # 硬门槛
         rows.append(
             {
-                "assertion_id": a.assertion_id,
+                "assertion_id": assertion_version_id(a.assertion_id, a.run_id),
+                "source_assertion_id": a.assertion_id,
                 "fact_key": a.fact_key,
                 "subject_id": a.subject_id,
                 "object_id": a.object_id,
@@ -189,11 +223,11 @@ def upsert_assertions(
                 "created_at": now,
             }
         )
-    return store.execute_batches(_UPSERT_ASSERTIONS, rows, batch_size=batch_size)
+    return _write_build_rows(store, _UPSERT_ASSERTIONS, rows, batch_size)
 
 
 def quality_report(store: Neo4jStore, run_id: str) -> dict:
-    """Compute the publication gate metrics for one run (设计 §9.3)."""
+    """Compute the publication gate metrics for one run."""
     rows = store.run(
         """
         MATCH (a:Assertion {run_id: $run_id})

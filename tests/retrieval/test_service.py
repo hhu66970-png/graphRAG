@@ -5,7 +5,6 @@ from graphragexpr.retrieval import service
 
 
 def test_fallback_returns_chunk_evidence_packet(monkeypatch):
-    """测试：回退返回文本块证据证据包。"""
     monkeypatch.setattr(service.serving_read, "active_run", lambda store: "run-1")
     monkeypatch.setattr(
         service.serving_read,
@@ -56,7 +55,6 @@ def test_fallback_returns_chunk_evidence_packet(monkeypatch):
 
 
 def test_path_steps_preserve_relationship_direction():
-    """测试：路径步骤保留关系方向。"""
     path = {
         "nodes": [
             {"id": "HERB:a", "name": "甲", "type": "HERB"},
@@ -74,7 +72,6 @@ def test_path_steps_preserve_relationship_direction():
 
 
 def test_intersection_subgraph_uses_real_serving_predicate():
-    """测试：交集子图使用真实Serving谓词。"""
     rows = [
         {
             "herb_id": "HERB:a",
@@ -102,7 +99,6 @@ def test_intersection_subgraph_uses_real_serving_predicate():
 
 
 def test_incompatibility_compare_reads_assertions_not_serving_edges(monkeypatch):
-    """测试：配伍禁忌对比读取断言不Serving边。"""
     linked = [
         {"canonical_id": "HERB:renshen", "name": "人参", "entity_type": "HERB"},
         {"canonical_id": "HERB:mahuang", "name": "麻黄", "entity_type": "HERB"},
@@ -169,7 +165,6 @@ def test_incompatibility_compare_reads_assertions_not_serving_edges(monkeypatch)
 
 
 def test_attr_dosage_reads_assertions_when_serving_card_empty(monkeypatch):
-    """测试：属性意图剂量读取断言当Serving卡片空。"""
     linked = [{"canonical_id": "HERB:fuzi", "name": "附子", "entity_type": "HERB"}]
     monkeypatch.setattr(service.serving_read, "active_run", lambda store: "run-1")
     monkeypatch.setattr(
@@ -210,7 +205,6 @@ def test_attr_dosage_reads_assertions_when_serving_card_empty(monkeypatch):
 
 
 def test_path_reads_assertion_edges_when_serving_has_none(monkeypatch):
-    """测试：路径读取断言边当Serving具有没有边。"""
     linked = [
         {"canonical_id": "HERB:gancao", "name": "甘草", "entity_type": "HERB"},
         {"canonical_id": "HERB:yuanhua", "name": "芫花", "entity_type": "HERB"},

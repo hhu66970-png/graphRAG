@@ -1,4 +1,4 @@
-"""Dosage parsed into a value object (设计 §2.1.2-C).
+"""Dosage parsed into a value object.
 
 「剂量」不宜作为普通可合并实体：`9～30g`、`煎服`、`儿童减量`、`先煎` 往往带条件。
 本模块把剂量文本解析为标准化数值 + 给药方式 + 条件，作为 Assertion.object_value

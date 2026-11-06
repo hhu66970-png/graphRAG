@@ -1,4 +1,4 @@
-"""I3 cross-chunk completion (设计 §2.1.1-3 与 §2.1.2-D).
+"""I3 cross-chunk completion.
 
 关键修正：**相邻 Chunk 只是回退策略，结构条目 ID 才是主依据**。
 教材里「人参」的性味在一块、用法用量与禁忌在下一块，二者同属一个 `entry_id`；

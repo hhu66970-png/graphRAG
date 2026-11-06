@@ -1,16 +1,7 @@
-"""I2 relation validation: deterministic rules first, LLM review only for the grey zone.
+"""I2 关系校验：规则检查与模型复核。
 
-设计 §2.1.2-A 指出原方案的缺陷：把 `llm_verify_score` 直接塞进统一线性公式，
-但高分候选根本不会进入 LLM 二次校验，导致字段语义不一致。
-
-本模块的流程：
-
-    先算 rule_score
-      ├─ 明确非法（硬失败）           -> REJECTED，不调 LLM
-      ├─ 明确支持（rule >= accept）   -> ACCEPTED，不调 LLM，llm_verdict=NOT_RUN
-      └─ 模糊区                       -> 调 LLM verifier -> 计算 final_score
-
-`final_score` 只是排序与决策支持值，**不得被描述为事实正确概率**（SKILL §7.3）。
+非法关系直接拒绝；高分非高风险关系直接接受，llm_verdict 保持 NOT_RUN。
+灰区和高风险谓词进入模型复核。final_score 用于排序与决策，不是事实正确概率。
 """
 
 from __future__ import annotations
@@ -122,7 +113,7 @@ def validate_relation(
                 final_score=0.0, status="REJECTED",
             )
 
-    # 证据不可定位 -> 绝不能 ACCEPTED（SKILL §3.1）
+    # 证据不可定位 -> 绝不能 ACCEPTED
     if not evidence.is_locatable:
         return ValidationResult(
             rule_score=0.0, rule_flags=["evidence_not_locatable"], review_required=True,

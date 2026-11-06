@@ -9,12 +9,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
+
+if __package__:
+    from .import_kg_bundle import BUNDLE_FORMAT, read_bundle
+else:
+    from import_kg_bundle import BUNDLE_FORMAT, read_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,18 +36,28 @@ def _driver():
     return GraphDatabase.driver(url, auth=(user, password)), os.getenv("NEO4J_DB") or None
 
 
-# 只保留 ACTIVE run 的 Assertion/Entity/IngestRun；Document、Chunk 与旧图实体
-# 属于共享数据，始终导出（旧图是前端四种对照检索模式的数据来源）。
-_ACTIVE_RUN = "MATCH (r:IngestRun {status:'ACTIVE'}) RETURN r.run_id AS run_id LIMIT 1"
+# Chunks and legacy nodes are shared; entities can belong to several runs.
+_ACTIVE_RUN = "MATCH (r:IngestRun {status:'ACTIVE'}) RETURN r.run_id AS run_id"
+
+
+def _in_active_scope(alias: str) -> str:
+    return f"""(
+        NOT ({alias}:Assertion OR {alias}:Entity OR {alias}:IngestRun)
+        OR {alias}.run_id = $run
+        OR ({alias}:Entity AND (
+            EXISTS {{ MATCH ({alias})-[:IN_RUN]->(:IngestRun {{run_id: $run}}) }}
+            OR EXISTS {{ MATCH (:Assertion {{run_id: $run}})-[:SUBJECT|OBJECT]->({alias}) }}
+        ))
+    )"""
+
 
 _NODES_ALL = """
 MATCH (n)
 RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props
 """
 
-_NODES_ACTIVE_ONLY = """
-MATCH (n)
-WHERE NOT (n:Assertion OR n:Entity OR n:IngestRun) OR n.run_id = $run
+_NODES_ACTIVE_ONLY = f"""
+MATCH (n) WHERE {_in_active_scope('n')}
 RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props
 """
 
@@ -51,11 +67,9 @@ RETURN elementId(a) AS source_id, elementId(b) AS target_id,
        type(r) AS type, properties(r) AS props
 """
 
-# 关系两端都必须在导出的节点集合内，否则导入时会因找不到端点被静默丢弃
-_RELS_ACTIVE_ONLY = """
+_RELS_ACTIVE_ONLY = f"""
 MATCH (a)-[r]->(b)
-WHERE (NOT (a:Assertion OR a:Entity OR a:IngestRun) OR a.run_id = $run)
-  AND (NOT (b:Assertion OR b:Entity OR b:IngestRun) OR b.run_id = $run)
+WHERE {_in_active_scope('a')} AND {_in_active_scope('b')}
   AND (r.active_run_id IS NULL OR r.active_run_id = $run)
 RETURN elementId(a) AS source_id, elementId(b) AS target_id,
        type(r) AS type, properties(r) AS props
@@ -64,26 +78,28 @@ RETURN elementId(a) AS source_id, elementId(b) AS target_id,
 
 def export_bundle(output: Path, *, active_only: bool = False) -> Path:
     """把库中的图与向量导出为 zip。"""
-    driver, database = _driver()
     output = output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    if output.exists():
-        output.unlink()
+    driver, database = _driver()
+    temporary: Path | None = None
 
     try:
         driver.verify_connectivity()
+        with tempfile.NamedTemporaryFile(prefix=f".{output.name}.", suffix=".tmp", dir=output.parent, delete=False) as handle:
+            temporary = Path(handle.name)
         with driver.session(database=database) as session, zipfile.ZipFile(
-            output, "w", compression=zipfile.ZIP_DEFLATED
+            temporary, "w", compression=zipfile.ZIP_DEFLATED
         ) as archive:
             run_id = None
             if active_only:
                 rows = list(session.run(_ACTIVE_RUN))
-                if not rows:
-                    raise RuntimeError("没有 ACTIVE 的 IngestRun，无法按 --active-only 导出")
+                if len(rows) != 1:
+                    raise RuntimeError("按 --active-only 导出需要且仅能有一个 ACTIVE 批次")
                 run_id = rows[0]["run_id"]
                 print(f"only exporting ACTIVE run: {run_id}")
 
             node_count = 0
+            dimensions = None
             with archive.open("nodes.jsonl", "w") as handle:
                 for record in session.run(
                     _NODES_ACTIVE_ONLY if active_only else _NODES_ALL,
@@ -94,6 +110,11 @@ def export_bundle(output: Path, *, active_only: bool = False) -> Path:
                         "labels": list(record["labels"]),
                         "props": dict(record["props"]),
                     }
+                    if "Chunk" in payload["labels"] and payload["props"].get("embedding") is not None:
+                        actual = len(payload["props"]["embedding"])
+                        if dimensions is not None and dimensions != actual:
+                            raise ValueError("Chunk embeddings have inconsistent dimensions")
+                        dimensions = actual
                     handle.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
                     node_count += 1
                     if node_count % 1000 == 0:
@@ -117,24 +138,30 @@ def export_bundle(output: Path, *, active_only: bool = False) -> Path:
                         print(f"exported relationships: {rel_count}", flush=True)
 
             meta = {
-                "format": "zhongyaoxue-kg-bundle-v1",
+                "format": BUNDLE_FORMAT,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "node_count": node_count,
                 "relationship_count": rel_count,
-                "embed_dim": int(os.getenv("EMBED_DIM", "512")),
+                "embed_dim": dimensions if dimensions is not None else int(os.getenv("EMBED_DIM", "512")),
                 "embed_model": os.getenv("EMBED_MODEL", "BAAI/bge-small-zh-v1.5"),
                 "active_run_id": run_id,
                 "notes": "Contains Chunk.embedding vectors and domain entities. Recreate indexes after import.",
             }
             archive.writestr("manifest.json", json.dumps(meta, ensure_ascii=False, indent=2))
-            print(f"done: {output} ({node_count} nodes, {rel_count} relationships)")
+        read_bundle(temporary)
+        # Replacing only a validated archive also preserves the previous backup on read/write failures.
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        temporary.replace(output)
+        print(f"done: {output} ({node_count} nodes, {rel_count} relationships)")
     finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
         driver.close()
     return output
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     parser = argparse.ArgumentParser(description="Export Neo4j GraphRAG bundle")
     parser.add_argument(
         "--output",
@@ -145,7 +172,7 @@ def main() -> int:
     parser.add_argument(
         "--active-only",
         action="store_true",
-        help="只导出 ACTIVE run 的 Assertion/Entity/IngestRun，排除已废弃的历史 run",
+        help="导出 ACTIVE 批次及其共享文本与实体，排除历史批次",
     )
     args = parser.parse_args()
     export_bundle(args.output, active_only=args.active_only)

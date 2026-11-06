@@ -15,7 +15,6 @@ class SimpleHashEmbedder:
     """
 
     def __init__(self, dimension: int = 1536):
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self.dimension = dimension
 
     def embed_query(self, text: str) -> list[float]:

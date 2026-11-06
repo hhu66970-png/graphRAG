@@ -1,4 +1,4 @@
-"""保守解析的直接测试（任务书 §5.2）。
+"""保守解析的直接测试。
 
 验收测试只能从响应形态上间接看到解析结果（「未交换」「不借用别的用法」）；这里直接
 对解析结果断言，覆盖旧解析器在高风险场景里**不能**做的三件事：
@@ -103,7 +103,6 @@ def test_page_reference_is_not_a_dose():
 
 
 def test_no_dosage_yields_empty_list():
-    """测试：没有剂量得到空列表。"""
     assert parse_dosage_units("") == []
     assert parse_dosage_units("   ") == []
     # 「适量外用」解析不出数值：由组装层保留为不明确单元，解析层不猜数值
@@ -111,7 +110,6 @@ def test_no_dosage_yields_empty_list():
 
 
 def test_single_value_binding():
-    """测试：单个值绑定。"""
     binding = parse_dosage_units("研末服，0.5g")[0]
 
     assert binding.is_single_value is True

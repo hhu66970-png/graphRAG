@@ -1,11 +1,8 @@
-"""Typed serving projection rebuilt from the assertion layer (设计 §4.2).
+"""从 Assertion 层重建类型化 Serving 边。
 
-检索侧需要「快」，所以把 `ACTIVE + ACCEPTED` 的断言投影成类型化直接边；
-但审计、版本、冲突与多来源仍由 Assertion 层承担。Serving Edge 是**可重建的派生物**，
-不是事实源——这正是建图文档与检索文档冲突的化解方式。
-
-关系类型只能来自本体白名单：先用 Ontology 校验，再按谓词分组拼接语句
-（SKILL §9.2 允许的唯一动态拼接方式），杜绝把模型输出直接拼进 Cypher。
+为 BUILDING 批次预备 ACCEPTED、POSITIVE 的断言投影，发布后由读取端使用。版本、冲突和完整来源
+保留在 Assertion 层，Serving 边用于检索，可随时重建。
+关系类型经过本体白名单校验后才拼入 Cypher；其余值通过参数传入。
 """
 
 from __future__ import annotations
@@ -13,14 +10,15 @@ from __future__ import annotations
 from collections import defaultdict
 
 from ..domain.ontology import Ontology
+from ..domain.errors import RunStateError
 from .neo4j_store import Neo4jStore
 
-# 每条 Serving Edge 携带的证据摘要（设计 §4.2 边属性）
+# 每条 Serving Edge 携带的证据摘要
 _PROJECT_TEMPLATE = """
 UNWIND $batch AS row
 MATCH (s:Entity {{canonical_id: row.subject_id}})
 MATCH (o:Entity {{canonical_id: row.object_id}})
-MERGE (s)-[e:`{predicate}` {{fact_key: row.fact_key}}]->(o)
+MERGE (s)-[e:`{predicate}` {{fact_key: row.fact_key, active_run_id: row.run_id}}]->(o)
 SET e.best_support_score = row.best_support_score,
     e.evidence_count     = row.evidence_count,
     e.evidence_ids       = row.evidence_ids,
@@ -71,22 +69,35 @@ def rebuild_projection(
         NEGATIVE 极性的断言不投影为正向边——「不宜与藜芦同用」不能变成
         一条肯定的配伍边。否定事实保留在 Assertion 层供检索侧单独处理。
     """
-    facts = store.run(_COLLECT_FACTS, run_id=run_id)
+    def rebuild(tx):
+        state = tx.run(
+            "MATCH (r:IngestRun {run_id: $run_id}) "
+            "SET r.write_lock = coalesce(r.write_lock, 0) + 1 RETURN r.status AS status",
+            run_id=run_id,
+        ).single()
+        if state is None or state["status"] != "BUILDING":
+            raise RunStateError("只能重建 BUILDING 批次的投影")
+        facts = list(tx.run(_COLLECT_FACTS, run_id=run_id))
+        grouped: dict[str, list[dict]] = defaultdict(list)
+        skipped = 0
+        for fact in facts:
+            predicate = fact["predicate"]
+            if predicate not in ontology.predicates:
+                skipped += 1
+                continue
+            grouped[predicate].append({**dict(fact), "run_id": run_id})
 
-    grouped: dict[str, list[dict]] = defaultdict(list)
-    skipped = 0
-    for fact in facts:
-        predicate = fact["predicate"]
-        if predicate not in ontology.predicates:
-            skipped += 1
-            continue
-        grouped[predicate].append({**fact, "run_id": run_id})
+        tx.run(_DROP_PROJECTION, run_id=run_id).consume()
+        written = 0
+        for predicate, rows in grouped.items():
+            cypher = _PROJECT_TEMPLATE.format(predicate=predicate)
+            for start in range(0, len(rows), batch_size):
+                batch = rows[start : start + batch_size]
+                tx.run(cypher, batch=batch).consume()
+                written += len(batch)
+        return {"edges": written, "predicates": len(grouped), "skipped": skipped}
 
-    store.run(_DROP_PROJECTION, run_id=run_id)
-
-    written = 0
-    for predicate, rows in grouped.items():
-        cypher = _PROJECT_TEMPLATE.format(predicate=predicate)
-        written += store.execute_batches(cypher, rows, batch_size=batch_size)
-
-    return {"edges": written, "predicates": len(grouped), "skipped": skipped}
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    with store.session() as session:
+        return session.execute_write(rebuild)

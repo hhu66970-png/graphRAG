@@ -1,21 +1,8 @@
-"""第三部分（回答组织与前端展示）的接口层与前端回归。
+"""回答组织与前端渲染回归。
 
-为什么单独一组：第三部分改的是**已经核验通过的证据怎么组织给用户看**，
-不碰检索、不碰核验算法。这类改动最容易「后端单元测试全绿、用户在页面上
-看到的还是老样子」，因此这里必须从两个真实边界去看：
-
-1. **接口边界**：`/api/graphrag` 的真实响应里有 `decision`／`decision_text`／
-   `verification_note`／`answer_blocks`／`other_conditions`，
-   且与本题条件不同的证据确实被挡在 `answer`／`claims`／`evidence_units`／
-   `sources`／`subgraph` 之外，只出现在折叠区。
-2. **浏览器边界**：把 `frontend/index.html` 里的**纯函数原样抽出来，用
-   Node 真实执行**（不是读源码猜字符串），检查成对 `**` 被去掉、实体高亮仍
-   生效、`<script>` 仍被转义、普通回答仍走原来的整体渲染。
-
-环境隔离：与 `test_high_risk_api.py` 同一套替身（检索／Neo4j／普通 LLM 全部
-被替换，嵌入器一旦被调用即失败），本文件在没有数据库、没有网络、没有本地模型
-的机器上必须全绿。唯一的外部依赖是 Node.js；缺失时前端执行用例明确 skip，
-**不会**被记成通过。
+通过 Flask 测试客户端检查证据、结论和来源的一致性；通过 Node 执行前端
+纯函数，检查文字整理、实体高亮、HTML 转义和不同核验状态的展示。
+检索、数据库与 LLM 使用 tests/api/conftest.py 中的替身。
 """
 
 from __future__ import annotations
@@ -37,7 +24,14 @@ from .conftest import (
     assertion_row,
 )
 
-FRONTEND = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
+
+
+def frontend_source() -> str:
+    return "\n".join(
+        (FRONTEND / path).read_text(encoding="utf-8")
+        for path in ("index.html", "assets/app.css", "assets/app.js")
+    )
 
 #: 「与本题指定条件不同」的人群。真实库里附子/麻黄都有这一条，
 #: 也是拆改前抢占第一屏的那一条。
@@ -105,7 +99,7 @@ def test_first_sentence_answers_the_question_through_the_api(client, wire):
 
 
 def test_answer_blocks_carry_kind_and_order(client, wire):
-    """分块让前端按种类套样式；顺序即任务书 §7 的展示顺序。"""
+    """分块让前端按种类套样式；顺序即的展示顺序。"""
     wire(rows=rows_with_other_population())
 
     code, data = ask(client, POPULATION_QUESTION, "auto")
@@ -283,8 +277,8 @@ def _node_binary() -> str:
 #: （只依赖彼此，不碰 DOM），因此可以在 Node 里独立执行。`renderProvenance`
 #: 与 `renderHighRiskBlock` 也在这一段里：回答正文、溯源入口与证据卡的渲染
 #: 必须一起验，否则「卡片不见了」与「说明行一起丢了」分不开。
-_SNIPPET_START = "        function escapeHtml(value) {"
-_SNIPPET_END = "        function hideWelcome() {"
+_SNIPPET_START = "function escapeHtml(value) {"
+_SNIPPET_END = "function hideWelcome() {"
 
 _DRIVER = r"""
 const fs = require('fs');
@@ -339,7 +333,7 @@ const DOSE_QUOTE = '原文依据：附子煎服，3～15g。（第 231 页）';
 const FLAG = '原文说明：后续小句不是另一处独立剂量';
 
 /* 四档状态各一份真实形态的载荷。grounded 的正文与证据卡讲的是**同一批
-   证据**（这正是清单 §5⑨ 要断言「不再重复」的地方）。 */
+   证据**，用于检查展示去重。 */
 const grounded = {
   high_risk: {is_high_risk: true},
   answer_status: 'grounded',
@@ -457,13 +451,13 @@ process.stdout.write(JSON.stringify({
 @pytest.fixture(scope="module")
 def frontend_rendered() -> dict:
     """把前端纯函数抽出来在 Node 里真实执行一次，返回各用例的输出。"""
-    source = FRONTEND.read_text(encoding="utf-8")
+    source = frontend_source()
     try:
         start = source.index(_SNIPPET_START)
         end = source.index(_SNIPPET_END, start)
     except ValueError as exc:  # 函数被移动或改名
         raise AssertionError(
-            "frontend/index.html 中未找到待检查的纯函数区段"
+            "frontend/assets/app.js 中未找到待检查的纯函数区段"
             "（escapeHtml … hideWelcome）：若函数被移动或改名，"
             "请同步更新本用例的锚点，而不是删掉这条检查"
         ) from exc
@@ -554,7 +548,7 @@ def test_frontend_styles_and_wording_are_in_place():
     这里只检查**存在性**（样式本身由上面的执行用例检查行为），
     因为视觉效果无法在无头环境里可靠断言，不能假装已经验过。
     """
-    source = FRONTEND.read_text(encoding="utf-8")
+    source = frontend_source()
 
     for css_class in (
         ".answer-decision",
@@ -812,14 +806,14 @@ def test_provenance_entry_still_renders_without_the_cards(frontend_rendered):
 def test_ordinary_answers_and_graph_features_are_untouched(frontend_rendered):
     """⑫ 普通回答不产生高风险区块；图谱动画、统计面板与检索模式选择器未受影响。
 
-    这几处是队友的展示资产，本轮只做回答区的收口，必须留下可核对的原地锚点。
+    检查普通回答、图谱动画、统计面板和检索选择器的页面入口。
     """
     r = frontend_rendered
 
     assert r["hr_ordinary"] == ""
     assert r["hr_not_high_risk"] == ""
 
-    source = FRONTEND.read_text(encoding="utf-8")
+    source = frontend_source()
     for anchor in (
         'id="demo-graph"',
         ".demo-orbit",

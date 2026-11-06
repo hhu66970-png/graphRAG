@@ -1,6 +1,6 @@
 """Build the v2 evidence knowledge graph from the chunks already in Neo4j.
 
-管线（设计 §2.1 + §4，SKILL §3.1/§3.2/§3.7）：
+管线：
 
     ensure_schema
       -> start_run(BUILDING)
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -30,12 +31,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from graphragexpr.config.settings import KGSettings  # noqa: E402
+from graphragexpr.cache import atomic_write_text  # noqa: E402
 from graphragexpr.domain.ids import chunk_id as make_chunk_id  # noqa: E402
 from graphragexpr.domain.ids import normalize_text  # noqa: E402
 from graphragexpr.domain.models import ChunkRecord  # noqa: E402
@@ -50,7 +52,7 @@ from graphragexpr.linking.entity_resolver import AliasStore, EntityResolver  # n
 from graphragexpr.storage import assertions as assertion_store  # noqa: E402
 from graphragexpr.storage import runs as run_store  # noqa: E402
 from graphragexpr.storage import serving_projection  # noqa: E402
-from graphragexpr.storage.indexes import ensure_schema  # noqa: E402
+from graphragexpr.storage.indexes import check_vector_dimension, ensure_schema  # noqa: E402
 from graphragexpr.storage.neo4j_store import Neo4jStore  # noqa: E402
 
 DOCUMENT_ID = "zhongyaoxue-5e"
@@ -60,6 +62,7 @@ LOAD_CHUNKS = """
 MATCH (c:Chunk)
 WHERE c.text IS NOT NULL
 RETURN c.index AS index, c.text AS text,
+       c.chunk_id AS chunk_id,
        c.page_start AS page_start, c.page_end AS page_end,
        coalesce(c.section, '') AS section
 ORDER BY c.index
@@ -74,25 +77,23 @@ RETURN count(d) AS migrated
 MIGRATE_CHUNK = """
 UNWIND $batch AS row
 MATCH (c:Chunk {index: row.index})
-SET c.chunk_id       = row.chunk_id,
-    c.document_id    = row.document_id,
-    c.normalized_text= row.normalized_text,
-    c.content_hash   = row.content_hash,
-    c.section_path   = row.section_path,
-    c.entry_id       = row.entry_id,
-    c.order_in_entry = row.order_in_entry
+SET c.chunk_id       = coalesce(c.chunk_id, row.chunk_id),
+    c.document_id    = coalesce(c.document_id, row.document_id),
+    c.normalized_text= coalesce(c.normalized_text, row.normalized_text),
+    c.content_hash   = coalesce(c.content_hash, row.content_hash),
+    c.section_path   = coalesce(c.section_path, row.section_path),
+    c.entry_id       = coalesce(c.entry_id, row.entry_id),
+    c.order_in_entry = coalesce(c.order_in_entry, row.order_in_entry)
 """
 
 
 class CachingLLMClient:
-    """Disk-cached wrapper around the real client (设计 §5 缓存键含版本).
+    """Disk-cached wrapper around the real client.
 
-    缓存键 = sha256(purpose + prompt + schema 名 + prompt_version + schema_version)。
-    Prompt/Schema 版本一变缓存自动失效，符合 SKILL §3.7。
+    缓存包含模型、接口、完整提示词、Schema 和生成参数的指纹。
     """
 
     def __init__(self, inner: OpenAICompatibleClient, settings: KGSettings) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._inner = inner
         self._settings = settings
         self._lock = threading.Lock()
@@ -110,20 +111,35 @@ class CachingLLMClient:
         """返回 LLM 失败清单。"""
         return self._inner.failures
 
-    def _key(self, purpose: str, user: str, schema: type[BaseModel]) -> Path:
+    def _key(self, purpose: str, system: str, user: str, schema: type[BaseModel]) -> Path:
         """构造缓存键。"""
-        raw = "␟".join([purpose, user, schema.__name__, *self._settings.cache_key_parts()])
-        return CACHE_DIR / f"{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}.json"
+        identity = {
+            "cache_format": 2,
+            "provider": self._inner.cache_identity,
+            "purpose": purpose,
+            "system": system,
+            "user": user,
+            "schema": schema.model_json_schema(),
+            "versions": self._settings.cache_key_parts(),
+            "temperature": self._settings.llm_temperature,
+        }
+        raw = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return CACHE_DIR / f"{hashlib.sha256(raw.encode('utf-8')).hexdigest()}.json"
 
     def complete_json(self, *, system: str, user: str, schema: type[BaseModel], purpose: str):
         """调用 LLM 并校验返回值为指定 JSON Schema。"""
-        path = self._key(purpose, user, schema)
+        path = self._key(purpose, system, user, schema)
         if path.exists():
-            with self._lock:
-                self.hits += 1
-            return schema.model_validate_json(path.read_text(encoding="utf-8"))
+            try:
+                result = schema.model_validate_json(path.read_text(encoding="utf-8"))
+            except (ValidationError, UnicodeDecodeError):
+                pass  # An interrupted or obsolete cache entry is recomputed.
+            else:
+                with self._lock:
+                    self.hits += 1
+                return result
         result = self._inner.complete_json(system=system, user=user, schema=schema, purpose=purpose)
-        path.write_text(result.model_dump_json(), encoding="utf-8")
+        atomic_write_text(path, result.model_dump_json())
         with self._lock:
             self.misses += 1
         return result
@@ -133,7 +149,6 @@ class LockedResolver:
     """Thread-safe facade over EntityResolver (AliasStore 是共享可变状态)."""
 
     def __init__(self, inner: EntityResolver) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._inner = inner
         self._lock = threading.Lock()
 
@@ -146,7 +161,7 @@ class LockedResolver:
 def load_chunks(
     store: Neo4jStore, limit: int | None
 ) -> tuple[list[ChunkRecord], dict[str, int]]:
-    """Load chunks and attach herb-entry structure (设计 §2.1.2-D)。
+    """Load chunks and attach herb-entry structure 。
 
     entry_id 由 ingest.structure 从 OCR 版式识别（药名 + 拼音（《典籍》）），
     是跨块补全的主依据；识别不到条目的前言/总论块 entry_id 为 None。
@@ -165,7 +180,7 @@ def load_chunks(
         text = row["text"]
         section_path = [row["section"]] if row["section"] else []
         normalized = normalize_text(text)
-        cid = make_chunk_id(DOCUMENT_ID, section_path, normalized)
+        cid = row.get("chunk_id") or make_chunk_id(DOCUMENT_ID, section_path, normalized)
         records.append(
             ChunkRecord(
                 chunk_id=cid,
@@ -207,24 +222,41 @@ def migrate_chunks(
     return store.execute_batches(MIGRATE_CHUNK, rows, batch_size=batch_size)
 
 
+def validate_embedding_dimensions(store: Neo4jStore, expected: int) -> None:
+    rows = store.run(
+        "MATCH (c:Chunk) WHERE c.embedding IS NOT NULL "
+        "RETURN DISTINCT size(c.embedding) AS dimensions"
+    )
+    dimensions = {row["dimensions"] for row in rows}
+    if dimensions - {expected}:
+        raise ValueError(f"Chunk 向量维度 {sorted(dimensions)} 与 EMBED_DIM={expected} 不一致")
+
+
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Build the v2 evidence KG")
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个文本块")
     parser.add_argument("--workers", type=int, default=6, help="并发抽取线程数")
     parser.add_argument("--activate", action="store_true", help="质量达标则切为 ACTIVE")
     args = parser.parse_args()
+    if args.workers <= 0 or (args.limit is not None and args.limit <= 0):
+        parser.error("--workers 和 --limit 必须为正整数")
+    embedding_dim = int(os.getenv("EMBED_DIM") or "512")
+    if embedding_dim <= 0:
+        parser.error("EMBED_DIM 必须为正整数")
 
     settings = KGSettings()
     ontology = load_ontology()
     store = Neo4jStore()
     started = time.time()
+    run = None
 
     try:
         store.verify()
+        validate_embedding_dimensions(store, embedding_dim)
         print(f"[1/7] 建立约束与索引 ...", flush=True)
-        schema_info = ensure_schema(store, embedding_dim=512, rebuild_fulltext=False)
+        schema_info = ensure_schema(store, embedding_dim=embedding_dim, rebuild_fulltext=False)
+        check_vector_dimension(store, index_name="text_embeddings", expected=embedding_dim)
         print(f"      {schema_info}")
 
         run = run_store.start_run(
@@ -233,6 +265,8 @@ def main() -> int:
         print(f"[2/7] 新建 IngestRun {run.run_id} (BUILDING)")
 
         chunks, index_by_chunk = load_chunks(store, args.limit)
+        if not chunks:
+            raise RuntimeError("Neo4j 中没有可用的 Chunk，请先导入数据包或初始化语料")
         coverage = entry_coverage(chunks)
         print(f"[3/7] 载入 {len(chunks)} 个文本块｜识别药物条目 "
               f"{coverage['distinct_entries']} 个，覆盖 {coverage['coverage']:.1%}")
@@ -279,7 +313,7 @@ def main() -> int:
                               f"| 缓存命中 {llm.hits} | LLM 调用 {llm.usage.calls} "
                               f"| 失败块 {len(failed_chunks)}", flush=True)
 
-        # ---- I3 跨块补全（设计 §2.1.1-3）--------------------------------
+        # ---- I3 跨块补全--------------------------------
         # 只补「该条目锚点药在该块尚无断言」的块：教材条目里大量句子省略主语
         # （「本品味辛性凉…」），逐块抽取会丢掉或错认，补全把它们归回锚点药。
         cross_added = 0
@@ -385,6 +419,8 @@ def main() -> int:
         failed_rate = report["failed_chunks"] / max(len(chunks), 1)
         report["failed_chunk_rate"] = round(failed_rate, 4)
         gate_failures: list[str] = []
+        if report["accepted"] <= 0:
+            gate_failures.append("没有可发布的 ACCEPTED 断言，保留当前活动版本")
         if report["evidence_coverage"] < settings.gate_min_evidence_coverage:
             gate_failures.append(
                 f"证据覆盖率 {report['evidence_coverage']:.3f} < "
@@ -414,6 +450,13 @@ def main() -> int:
             for index, error in failed_chunks[:10]:
                 print(f"  chunk[{index}]: {error}")
         return 0
+    except (Exception, KeyboardInterrupt) as exc:
+        if run is not None:
+            try:
+                run_store.mark_failed(store, run.run_id, str(exc) or type(exc).__name__)
+            except Exception:
+                print(f"无法标记失败批次 {run.run_id}", file=sys.stderr)
+        raise
     finally:
         store.close()
 

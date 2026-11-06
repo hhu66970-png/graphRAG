@@ -68,7 +68,6 @@ def test_yes_no_question_is_not_an_enumeration():
 
 
 def test_enumeration_question_is_recognized():
-    """测试：枚举型问题为被识别。"""
     assert is_enumeration_question("孕妇禁用的中药有哪些？") is True
     assert is_enumeration_question("孕妇不能吃哪些药？") is True
     assert is_enumeration_question("请列举孕妇慎用的中药") is True
@@ -76,7 +75,6 @@ def test_enumeration_question_is_recognized():
 
 # --------------------------------------------------------------- 泛称对象
 def test_generic_class_words_are_not_a_named_object():
-    """测试：泛化类别词不具名宾语。"""
     assert is_generic_object("中药") is True
     assert is_generic_object("药材") is True
 
@@ -98,7 +96,6 @@ def test_patent_medicine_name_is_not_a_single_herb():
 
 
 def test_adjacent_dosage_form_after_the_name_is_detected():
-    """测试：紧邻的剂量剂型之后名称为被检测到。"""
     assert longer_object_span("六味地黄丸孕妇能用吗？", "地黄") == "地黄丸"
 
 
@@ -111,7 +108,6 @@ def test_preparation_verbs_are_not_mistaken_for_another_object():
 
 
 def test_ordinary_questions_do_not_trip_the_truncation_check():
-    """测试：普通问题不误触发截断检查。"""
     assert longer_object_span("附子孕妇能用吗？", "附子") is None
     assert longer_object_span("附子不宜与什么药同用？", "附子") is None
     assert longer_object_span("附子的用量是多少？", "附子") is None
@@ -155,7 +151,6 @@ def test_decoction_and_oral_are_the_same_route_family():
 
 
 def test_oral_and_topical_are_different_families():
-    """测试：内服且外用不同途径族。"""
     assert same_route_family("外用", "内服") is False
     assert same_route_family("内服", "外用") is False
 
@@ -173,7 +168,6 @@ def test_population_mismatch_blocks_grounded():
 
 
 def test_matching_population_allows_grounded():
-    """测试：匹配的人群允许有证据支撑。"""
     assessment = assess_applicability(
         "附子孕妇能用吗？", [unit(population="孕妇", severity=RestrictionSeverity.CAUTION)]
     )
@@ -183,7 +177,6 @@ def test_matching_population_allows_grounded():
 
 
 def test_population_mismatch_reports_which_populations_the_evidence_covers():
-    """测试：人群不一致报告哪些人群证据覆盖。"""
     assessment = assess_applicability(
         "附子小儿能用吗？", [unit(population="妊娠"), unit(population="孕妇")]
     )
@@ -220,7 +213,6 @@ def test_preparation_mismatch_blocks_grounded():
 
 
 def test_unconfirmed_subject_blocks_before_any_condition_check():
-    """测试：未确认的主语拦截在…之前任何条件检查。"""
     assessment = assess_applicability(
         "安宫牛黄丸孕妇能用吗？",
         [unit(population="孕妇")],
@@ -298,7 +290,6 @@ def test_non_population_objects_still_compare_by_their_own_identity():
 
 
 def test_different_populations_are_not_a_conflict():
-    """测试：不同人群不冲突。"""
     units = [
         unit(unit_id="u-a", object_name="孕妇", population="孕妇",
              severity=RestrictionSeverity.PROHIBITED),
@@ -310,7 +301,6 @@ def test_different_populations_are_not_a_conflict():
 
 
 def test_unspecified_severity_never_counts_as_a_conflict():
-    """测试：未标明的严重程度绝不算作作为冲突。"""
     units = [
         unit(unit_id="u-a", object_name="孕妇", population="孕妇",
              severity=RestrictionSeverity.PROHIBITED),
@@ -323,7 +313,6 @@ def test_unspecified_severity_never_counts_as_a_conflict():
 
 # ------------------------------------------------------------- 展示排序
 def test_sort_by_severity_puts_prohibited_first_and_is_stable():
-    """测试：排序按严重程度把禁用放在前面且为稳定。"""
     units = [
         unit(unit_id="a", severity=RestrictionSeverity.CAUTION),
         unit(unit_id="b", severity=RestrictionSeverity.PROHIBITED),

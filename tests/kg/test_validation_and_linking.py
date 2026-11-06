@@ -1,10 +1,10 @@
 """I1 实体消歧 / I2 关系验证 / I3 跨块补全 / LLMClient 的单元测试。
 
-重点回归 SKILL 与设计文档明确点名的缺陷：
-  - rule_score 与 final_score 语义不得混用（设计 §2.1.2-A）
+主要回归场景：
+  - rule_score 与 final_score 语义不得混用
   - 未进入二次校验时 llm_verdict 必须是 NOT_RUN
   - 绝不跨实体类型合并（旧图 506 个同名跨类型实体的根因）
-  - 跨块补全以 entry_id 为主依据，相邻块只是回退（设计 §2.1.2-D）
+  - 跨块补全以 entry_id 为主依据，相邻块只是回退
 """
 
 from __future__ import annotations
@@ -45,7 +45,6 @@ def _span(quote: str, mode: str = "raw_exact", distance: int = 0) -> EvidenceSpa
 
 
 class TestRelationValidator:
-    """测试类：覆盖「RelationValidator」相关行为。"""
     def test_accepts_clean_relation_without_calling_llm(self, ontology, settings):
         """明确支持的候选不应触发 LLM；llm_verdict 必须保持 NOT_RUN。"""
         calls = []
@@ -68,7 +67,6 @@ class TestRelationValidator:
         assert result.rule_score == result.final_score
 
     def test_domain_range_violation_rejected_without_llm(self, ontology, settings):
-        """测试：定义域区间违规被拒绝没有LLM。"""
         calls = []
         result = validate_relation(
             ontology=ontology, settings=settings,
@@ -82,7 +80,6 @@ class TestRelationValidator:
         assert calls == []
 
     def test_self_loop_rejected(self, ontology, settings):
-        """测试：自我自环被拒绝。"""
         result = validate_relation(
             ontology=ontology, settings=settings,
             predicate="COMBINED_WITH", subject_type="HERB", object_type="HERB",
@@ -91,7 +88,6 @@ class TestRelationValidator:
         assert result.status == "REJECTED" and "self_loop" in result.rule_flags
 
     def test_ocr_noise_rejected(self, ontology, settings):
-        """测试：OCR噪声被拒绝。"""
         result = validate_relation(
             ontology=ontology, settings=settings,
             predicate="HAS_EFFICACY", subject_type="HERB", object_type="EFFICACY",
@@ -101,7 +97,7 @@ class TestRelationValidator:
         assert any("ocr_noise" in f for f in result.rule_flags)
 
     def test_unlocatable_evidence_never_accepted(self, ontology, settings):
-        """SKILL §3.1：证据无法定位只能 REVIEW。"""
+        """证据无法定位只能 REVIEW。"""
         result = validate_relation(
             ontology=ontology, settings=settings,
             predicate="HAS_EFFICACY", subject_type="HERB", object_type="EFFICACY",
@@ -112,7 +108,6 @@ class TestRelationValidator:
         assert "evidence_not_locatable" in result.rule_flags
 
     def test_negation_polarity_mismatch_penalised(self, ontology, settings):
-        """测试：否定极性不一致被扣分。"""
         result = validate_relation(
             ontology=ontology, settings=settings,
             predicate="COMBINED_WITH", subject_type="HERB", object_type="HERB",
@@ -145,7 +140,6 @@ class TestRelationValidator:
         assert "high_risk_predicate" in result.rule_flags
 
     def test_dosage_without_value_is_penalised(self, ontology, settings):
-        """测试：剂量没有值为被扣分。"""
         result = validate_relation(
             ontology=ontology, settings=settings,
             predicate="HAS_DOSAGE", subject_type="HERB", object_type="DOSAGE",
@@ -171,7 +165,6 @@ class TestRelationValidator:
 
 
 class TestEntityResolver:
-    """测试类：覆盖「EntityResolver」相关行为。"""
     def _resolver(self, settings):
         """测试用：实体链接器。"""
         store = AliasStore()
@@ -183,7 +176,6 @@ class TestEntityResolver:
         return EntityResolver(store, settings), store
 
     def test_exact_alias_match(self, settings):
-        """测试：精确别名match。"""
         resolver, store = self._resolver(settings)
         decision = resolver.resolve("园参", "HERB")
         assert not decision.is_new
@@ -199,7 +191,7 @@ class TestEntityResolver:
         assert efficacy.record.entity_type == "EFFICACY"
 
     def test_related_but_distinct_herbs_not_merged(self, settings):
-        """人参 / 红参 有关联但不等价，不得合并（设计 §2.1.1-1）。"""
+        """人参 / 红参 有关联但不等价，不得合并。"""
         resolver, store = self._resolver(settings)
         ginseng = resolver.resolve("人参", "HERB")
         red = resolver.resolve("红参", "HERB")
@@ -215,14 +207,12 @@ class TestEntityResolver:
             assert decision.record.link_method != "new_entity"
 
     def test_new_entity_created_when_no_candidate(self, settings):
-        """测试：新实体被创建当没有候选。"""
         resolver, store = self._resolver(settings)
         decision = resolver.resolve("石斛", "HERB")
         assert decision.is_new
         assert decision.record.canonical_id == canonical_id("HERB", "石斛")
 
     def test_registration_is_idempotent(self, settings):
-        """测试：注册为幂等。"""
         resolver, store = self._resolver(settings)
         first = resolver.resolve("石斛", "HERB").record
         second = resolver.resolve("石斛", "HERB").record
@@ -230,7 +220,6 @@ class TestEntityResolver:
         assert len([r for r in store.all_records() if r.preferred_name == "石斛"]) == 1
 
     def test_empty_surface_rejected(self, settings):
-        """测试：空表面形式被拒绝。"""
         resolver, _ = self._resolver(settings)
         with pytest.raises(ValueError):
             resolver.resolve("   ", "HERB")
@@ -246,7 +235,6 @@ def _chunk(cid: str, text: str, *, entry: str | None, order: int, page: int) -> 
 
 
 class TestCrossChunk:
-    """测试类：覆盖「CrossChunk」相关行为。"""
     def test_entry_id_is_primary_basis(self, settings):
         """同一 entry_id 内配对，即使两块不相邻。"""
         chunks = [
@@ -263,7 +251,6 @@ class TestCrossChunk:
         assert (ginseng[0].page_start, ginseng[0].page_end) == (132, 133)
 
     def test_does_not_pair_across_different_entries(self, settings):
-        """测试：不配对跨不同条目。"""
         chunks = [
             _chunk("c1", "人参　味甘。", entry="e_ginseng", order=0, page=132),
             _chunk("c2", "黄芪　味甘。", entry="e_astragalus", order=0, page=140),
@@ -274,7 +261,6 @@ class TestCrossChunk:
                    for g in groups)
 
     def test_adjacent_fallback_when_entry_missing(self, settings):
-        """测试：紧邻的回退当条目缺失。"""
         chunks = [
             _chunk("c1", "人参　味甘、微苦。", entry=None, order=0, page=132),
             _chunk("c2", "人参　煎服，3～9g。", entry=None, order=1, page=133),
@@ -291,50 +277,42 @@ class TestCrossChunk:
         assert build_groups(chunks, {"c1": ["人参"], "c2": ["人参"]}, settings) == []
 
     def test_empty_input(self, settings):
-        """测试：空输入。"""
         assert build_groups([], {}, settings) == []
 
 
 class _Payload(BaseModel):
-    """_Payload：本模块内部使用的数据结构。"""
     entities: list[str]
 
 
 class TestFakeLLMClient:
-    """测试类：覆盖「FakeLLMClient」相关行为。"""
     def test_returns_validated_payload(self):
-        """测试：返回已校验载荷。"""
         client = FakeLLMClient(responses={"extract": ['{"entities": ["人参"]}']})
         result = client.complete_json(system="s", user="u", schema=_Payload, purpose="extract")
         assert result.entities == ["人参"]
         assert client.usage.calls == 1
 
     def test_strips_code_fence(self):
-        """测试：去掉代码代码围栏。"""
         client = FakeLLMClient(responses={"extract": ['```json\n{"entities": []}\n```']})
         assert client.complete_json(system="s", user="u", schema=_Payload, purpose="extract").entities == []
 
     def test_invalid_json_raises_contract_error(self):
-        """测试：非法JSON抛出契约error。"""
         client = FakeLLMClient(responses={"extract": ["这不是 JSON"]})
         with pytest.raises(LLMContractError):
             client.complete_json(system="s", user="u", schema=_Payload, purpose="extract")
 
     def test_schema_violation_raises(self):
-        """测试：模式违规抛出。"""
         client = FakeLLMClient(responses={"extract": ['{"wrong_field": 1}']})
         with pytest.raises(LLMContractError):
             client.complete_json(system="s", user="u", schema=_Payload, purpose="extract")
 
     def test_missing_purpose_raises(self):
-        """测试：缺失用途抛出。"""
         client = FakeLLMClient(responses={})
         with pytest.raises(LLMContractError):
             client.complete_json(system="s", user="u", schema=_Payload, purpose="unknown")
 
 
 class TestNoFalseMerge:
-    """回归：包含式匹配绝不能自动合并有关联但不等价的中药（设计 §2.1.1-1）。
+    """回归：包含式匹配绝不能自动合并有关联但不等价的中药。
 
     这些用例来自全量构建后在真实图谱上发现的错误合并。
     """
@@ -361,7 +339,6 @@ class TestNoFalseMerge:
         ],
     )
     def test_containment_never_auto_merges(self, settings, existing, incoming):
-        """测试：包含关系绝不自动合并。"""
         resolver = self._resolver(settings, [existing])
         decision = resolver.resolve(incoming, "HERB")
         assert decision.is_new, f"{incoming} 不应被合并进 {existing}"
@@ -401,14 +378,13 @@ class TestNoFalseMerge:
 
 
 class TestTruncatedJsonRecovery:
-    """输出被长度上限截断时抢救完整前缀，而不是整块丢弃（SKILL §17 不隐藏失败）。"""
+    """输出被长度上限截断时抢救完整前缀，而不是整块丢弃。"""
 
     def _client(self, payload: str, settings):
         """测试用：FakeLLM。"""
         return FakeLLMClient(responses={"extract": [payload]}, settings=settings)
 
     def test_recovers_complete_elements(self, settings):
-        """测试：恢复完整元素。"""
         from graphragexpr.extract.extractor import RawExtraction
         truncated = (
             '{"entities": [{"name": "麻黄", "entity_type": "HERB"}], '
@@ -426,21 +402,18 @@ class TestTruncatedJsonRecovery:
         assert client.truncation_recoveries == 1, "降级必须可见"
 
     def test_intact_json_is_not_touched(self, settings):
-        """测试：完整JSON为不被改动。"""
         from graphragexpr.extract.extractor import RawExtraction
         client = self._client('{"entities": [], "relations": []}', settings)
         client.complete_json(system="s", user="u", schema=RawExtraction, purpose="extract")
         assert client.truncation_recoveries == 0
 
     def test_unrecoverable_garbage_still_raises(self, settings):
-        """测试：无法恢复的乱数据仍然抛出。"""
         from graphragexpr.extract.extractor import RawExtraction
         client = self._client("这不是 JSON，只是一段自然语言", settings)
         with pytest.raises(LLMContractError):
             client.complete_json(system="s", user="u", schema=RawExtraction, purpose="extract")
 
     def test_truncated_inside_string_drops_that_element(self, settings):
-        """测试：被截断内部字符串丢弃该元素。"""
         from graphragexpr.extract.extractor import RawExtraction
         truncated = (
             '{"entities": [], "relations": [{"subject": "麻黄", "predicate": "HAS_EFFICACY", '

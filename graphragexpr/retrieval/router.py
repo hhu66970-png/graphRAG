@@ -1,10 +1,10 @@
-"""Rule-first query intent router (design section 8)."""
+"""Rule-first query intent router."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ..config.settings import DEFAULT_RETRIEVAL_SETTINGS, RetrievalSettings
+from ..config.settings import RetrievalSettings
 from ..domain.ontology import Ontology, load_ontology
 from .models import RetrievalPlan
 
@@ -71,7 +71,7 @@ _HIGH_RISK_TERMS = (
 
 #: 公开别名：高风险服务层需要在没有 RetrievalPlan 的检索模式（如纯关键词图模式）
 #: 下判断同一个问题是否属于高风险。共用同一份词表，避免两处判定标准漂移；
-#: 这只是**策略开关**，六意图枚举不变（任务书 §1）。
+#: 这只是**策略开关**，六意图枚举不变。
 HIGH_RISK_TERMS: tuple[str, ...] = _HIGH_RISK_TERMS
 
 _PREDICATE_TERMS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
@@ -131,13 +131,14 @@ def route_query(
     linked_entities: Sequence[dict],
     *,
     ontology: Ontology | None = None,
-    settings: RetrievalSettings = DEFAULT_RETRIEVAL_SETTINGS,
+    settings: RetrievalSettings | None = None,
 ) -> RetrievalPlan:
     """Route a normalized question without making an LLM call.
 
     Comparison and safety rules are evaluated before entity-count heuristics. The returned
     reason/confidence are trace information, not calibrated probabilities.
     """
+    settings = settings or RetrievalSettings()
     normalized = "".join(question.split())
     if not normalized:
         raise ValueError("question must not be blank")

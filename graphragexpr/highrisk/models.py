@@ -1,15 +1,8 @@
-"""高风险回答的对外契约（任务书 §6、§10）。
+"""高风险回答的数据模型。
 
-设计要点
---------
-1. **状态分级不可压平**。`grounded / partial_grounded / source_only / abstain`
-   四档各自对应「哪些子问题被证据支持」，前端据此展示，而不是只看一个布尔值。
-2. **顶层 `abstained` 与逐子问题状态分开**（任务书 §6）。子问题部分成立时顶层
-   `abstained=true`，但已支持的结论和可信原文必须照常输出，不能被隐藏。
-3. **证据卡按单元出**，不按字段出。数值与它的用法／生制品／人群／限制程度
-   在展示层同样不能被拆开，否则前端会重现「数字对、条件错」的问题。
-4. `rejections` 保留被核验驳回的候选结论与硬性失败码，使「为什么没采用」
-   可追溯，也让模型自评无法悄悄翻案。
+逐子问题保存 grounded、partial_grounded、source_only 或 abstain 状态，
+顶层 abstained 不隐藏已支持的结论。证据卡按完整条件单元组织，
+rejections 保存未通过核验的候选结论及原因。
 """
 
 from __future__ import annotations
@@ -94,7 +87,7 @@ class EvidenceCard(_Base):
     #: 面向读者的「未解决说明」整句，由 `render.unresolved_flags` 在**单元**上
     #: 算好（分流要看 `dosage.parse_notes` 与结构标记，卡片字段不足以判断）。
     #: 前端直接显示这一列，不再对 `conflicts` 各自套模板：套错会把解析层
-    #: 说明说成「证据存在差异」，从而与「已核验」自相矛盾（第三部分 §6）。
+    #: 说明说成「证据存在差异」，从而与「已核验」自相矛盾。
     flags: list[str] = Field(default_factory=list)
 
     @classmethod
@@ -155,7 +148,7 @@ class VerifiedClaim(_Base):
 class AnswerBlockKind(str, Enum):
     """答案分块的种类。前端按种类套样式，**不靠字符串查找**加样式。
 
-    块顺序即展示顺序（任务书第三部分 §7）：结论 → 条件解释 → 原文依据 →
+    块顺序即展示顺序：结论 → 条件解释 → 原文依据 →
     冲突或不足说明。程序核验说明单独走 `verification_note` 字段，
     因为它必须渲染在**全部块之后**且样式独立。
     """
