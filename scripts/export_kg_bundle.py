@@ -150,7 +150,9 @@ def export_bundle(output: Path, *, active_only: bool = False) -> Path:
             archive.writestr("manifest.json", json.dumps(meta, ensure_ascii=False, indent=2))
         read_bundle(temporary)
         # Replacing only a validated archive also preserves the previous backup on read/write failures.
-        with temporary.open("rb") as handle:
+        # Windows _commit/fsync requires a writable descriptor. Keep the completed zip intact.
+        with temporary.open("r+b") as handle:
+            handle.flush()
             os.fsync(handle.fileno())
         temporary.replace(output)
         print(f"done: {output} ({node_count} nodes, {rel_count} relationships)")

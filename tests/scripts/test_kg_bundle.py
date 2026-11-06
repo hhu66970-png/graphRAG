@@ -250,7 +250,7 @@ def test_index_creation_failure_preserves_existing_graph(tmp_path, monkeypatch):
     assert driver.nodes[0]["id"] == "original"
 
 
-@pytest.mark.parametrize("failure", ["connection", "export_relationships", "invalid_archive", "replace"])
+@pytest.mark.parametrize("failure", ["connection", "export_relationships", "invalid_archive", "fsync", "replace"])
 def test_export_failure_preserves_existing_backup_and_cleans_temp(tmp_path, monkeypatch, failure):
     output = write_bundle(tmp_path / "backup.zip")
     before = output.read_bytes()
@@ -259,6 +259,8 @@ def test_export_failure_preserves_existing_backup_and_cleans_temp(tmp_path, monk
         driver.relationships = [{"source_id": "original", "target_id": "missing", "type": "MENTIONS", "props": {}}]
     if failure == "replace":
         monkeypatch.setattr(Path, "replace", lambda *args: (_ for _ in ()).throw(OSError("disk failure")))
+    if failure == "fsync":
+        monkeypatch.setattr(export.os, "fsync", lambda *args: (_ for _ in ()).throw(OSError("sync failure")))
     monkeypatch.setattr(export, "_driver", lambda: (driver, "test"))
     with pytest.raises((ConnectionError, RuntimeError, ValueError, OSError)):
         export.export_bundle(output)
@@ -278,6 +280,30 @@ def test_successful_export_is_valid_and_uses_actual_vector_dimensions(tmp_path, 
     assert manifest["embed_dim"] == 3
     assert nodes == driver.nodes
     assert rels == []
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["backup.zip"]
+
+
+def test_export_syncs_a_writable_descriptor_before_replacing_backup(tmp_path, monkeypatch):
+    output = write_bundle(tmp_path / "backup.zip")
+    before = output.read_bytes()
+    driver = FakeDriver()
+    real_fsync = os.fsync
+    synced = []
+
+    def windows_compatible_fsync(descriptor):
+        # A zero-byte write exposes read-only descriptors on both Windows and Linux.
+        # Windows fsync/_commit rejects them with EBADF even for an already closed zip.
+        assert output.read_bytes() == before
+        os.write(descriptor, b"")
+        real_fsync(descriptor)
+        synced.append(descriptor)
+
+    monkeypatch.setattr(export, "_driver", lambda: (driver, "test"))
+    monkeypatch.setattr(export.os, "fsync", windows_compatible_fsync)
+    export.export_bundle(output)
+    assert len(synced) == 1
+    _, nodes, _ = restore.read_bundle(output)
+    assert nodes == driver.nodes
     assert sorted(p.name for p in tmp_path.iterdir()) == ["backup.zip"]
 
 
