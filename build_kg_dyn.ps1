@@ -1,9 +1,7 @@
 ﻿# build_kg_dyn.ps1
 # 老师基线旧建图：按名称写节点边，仅作对照，正式构建请用 build_kg_v2.ps1。
 
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Building Knowledge Graph - 中药学" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Test-Path "origdata\zhongyaoxue.md")) {
@@ -34,6 +32,4 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host ""
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Knowledge graph build completed" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan

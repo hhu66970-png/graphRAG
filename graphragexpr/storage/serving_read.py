@@ -1,11 +1,11 @@
-"""Read access over the typed serving projection (SKILL §5.5).
+"""Read access over the typed serving projection.
 
 本模块只负责「把 ACTIVE run 的类型化边读成结构化结果」，**不生成自然语言答案、
-不做意图路由**——那属于 retrieval / generation 层（SKILL §5.6 / §5.8）。
+不做意图路由**——那属于 retrieval / generation 层。
 API 层可以直接编排这些函数来演示 v2 图谱，而不必复制任何检索逻辑。
 
 每个返回项都带 `page_start/page_end` 与 `evidence_ids`，使调用方能一路回溯到
-Assertion 层的逐字原句（SKILL §3.1 证据优先）。
+Assertion 层的逐字原句。
 """
 
 from __future__ import annotations
@@ -206,7 +206,6 @@ class CardSlot:
 
 @dataclass
 class HerbCard:
-    """HerbCard：本文件定义的数据结构或组件。"""
     canonical_id: str
     name: str
     aliases: list[str]
@@ -372,7 +371,7 @@ def link_entities_in_text(
 ) -> list[dict]:
     """Longest-match entity linking against the ACTIVE run's canonical entities.
 
-    仅用于 API 层的演示编排；正式的实体链接与意图路由属 retrieval 层（SKILL §5.6）。
+    仅用于 API 层的演示编排；正式的实体链接与意图路由属 retrieval 层。
     按名称长度降序返回，调用方取第一个即为最长匹配。
     """
     return store.run(
@@ -596,7 +595,7 @@ def card_to_context(card: HerbCard, evidence: list[dict]) -> tuple[str, list[dic
     """Serialise a card into prompt context plus a source list.
 
     确定性序列化：列名、页码、证据都由程序填充，不交给模型决定
-    （对应设计 §2.3.5「引用页码由程序填充」）。
+    （对应「引用页码由程序填充」）。
     """
     lines = [f"【{card.name}】"]
     if card.aliases:

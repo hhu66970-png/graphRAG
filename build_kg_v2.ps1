@@ -1,9 +1,7 @@
 ﻿# build_kg_v2.ps1
 # 启动新管线建图（抽取 + 断言 + 投影 + 发布）。旧管线对照见 build_kg_dyn.ps1。
 
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Building Evidence Knowledge Graph (v2)" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $env:PYTHONIOENCODING = "utf-8"
@@ -27,6 +25,4 @@ Write-Host "Verifying ..." -ForegroundColor Yellow
 & $pythonExe scripts\verify_kg_v2.py --herb 麻黄
 
 Write-Host ""
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Evidence KG build completed" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan

@@ -1,4 +1,4 @@
-"""IngestRun lifecycle: BUILDING -> ACTIVE / FAILED (SKILL §3.7, 设计 §2.1.3).
+"""IngestRun lifecycle: BUILDING -> ACTIVE / FAILED.
 
 - 新构建写入 `IngestRun(status=BUILDING)`；
 - 质量检查通过后**原子切换**为 ACTIVE，同一时刻只允许一个 ACTIVE；
@@ -24,14 +24,13 @@ SUPERSEDED = "SUPERSEDED"
 
 @dataclass(frozen=True)
 class RunHandle:
-    """RunHandle：本文件定义的数据结构或组件。"""
     run_id: str
     status: str
     created_at: str
 
 
 def start_run(store: Neo4jStore, *, settings_snapshot: dict, notes: str = "") -> RunHandle:
-    """Create a BUILDING run carrying the full config snapshot (SKILL §5.1)."""
+    """Create a BUILDING run carrying the full config snapshot."""
     run_id = new_run_id()
     created_at = datetime.now(timezone.utc).isoformat()
     store.run(
@@ -61,7 +60,7 @@ def get_active_run(store: Neo4jStore) -> str | None:
 
 
 def graph_revision(store: Neo4jStore) -> str:
-    """Cache-invalidation token (设计 §2.2.2-D).
+    """Cache-invalidation token.
 
     **不得用节点数**：改名、改别名、改证据时节点数可能不变。这里用
     active_run_id + 该 run 下断言数与最新写入时间的组合。
@@ -96,7 +95,7 @@ def activate(store: Neo4jStore, run_id: str, *, quality_report: dict) -> None:
     Args:
         store: 连接句柄。
         run_id: 必须处于 BUILDING 状态。
-        quality_report: 发布门槛检查结果，随 run 一起留档（设计 §9.3）。
+        quality_report: 发布门槛检查结果，随 run 一起留档。
 
     Raises:
         RunStateError: run 不存在或不处于 BUILDING。

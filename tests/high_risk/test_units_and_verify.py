@@ -1,4 +1,4 @@
-"""条件单元组装与候选结论核验的单元级测试（任务书 §5 / §6）。
+"""条件单元组装与候选结论核验的单元级测试。
 
 验收测试只看响应形态；这里直接对单元字段与核验判定断言，覆盖三类容易被「看起来对」
 掩盖的问题：
@@ -152,7 +152,7 @@ def test_stored_parse_conflict_is_recorded_not_silently_resolved():
 
 
 def test_predicate_outside_the_three_high_risk_ones_is_ignored():
-    """范围外谓词被忽略，不静默扩大本任务的处理范围。"""
+    """范围外谓词被忽略，不静默扩大处理范围。"""
     rows = [
         assertion_row(assertion_id="out", predicate="TREATS", evidence_quote="麻黄发汗解表。"),
         assertion_row(
@@ -189,7 +189,7 @@ def test_text_chunk_unit_never_carries_an_assertion_id():
 
 
 def test_text_chunk_unit_with_assertion_id_is_rejected():
-    """契约层直接拒绝「原文来源 + 事实标识」这一组合（任务书 §4）。"""
+    """契约层直接拒绝「原文来源 + 事实标识」这一组合。"""
     with pytest.raises(ValidationError, match="TEXT_CHUNK"):
         ConditionalEvidenceUnit(
             unit_id="unit:text",
@@ -398,7 +398,6 @@ def test_unclear_unit_cannot_support_a_definitive_claim():
 
 # ---------------------------------------------------------------- 核验：结果一致性
 def test_accepted_rejected_and_rejections_stay_consistent():
-    """测试：通过被拒绝且拒绝项保持一致。"""
     units = dosage_units("煎服，3～9g。")
     good = grounded_dosage_claim("c-good", units[0].unit_id)
     bad = grounded_dosage_claim("c-bad", "unit:not-cited", cited_unit_ids=[])

@@ -1,4 +1,4 @@
-# export_kg_bundle.ps1
+﻿# export_kg_bundle.ps1
 # 把当前 Neo4j 图和向量导出为 dist/zhongyaoxue-kg-bundle.zip，便于离线分发。
 
 $ErrorActionPreference = "Stop"

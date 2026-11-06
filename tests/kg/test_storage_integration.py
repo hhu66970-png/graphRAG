@@ -1,4 +1,4 @@
-"""存储层集成测试（SKILL §14.3）。
+"""存储层集成测试。
 
 安全约定：**绝不使用会 DETACH DELETE 全库的 fixture**。
 所有测试数据挂在一个独立的 document_id / run_id 下，结束时只删除自己创建的节点，
@@ -154,9 +154,8 @@ def _make_assertion(run_id: str, chunk_ids: list[str], **kwargs) -> AssertionRec
 
 
 class TestSchema:
-    """测试类：覆盖「Schema」相关行为。"""
     def test_required_constraints_exist(self, store):
-        """SKILL §9.3 的五个唯一约束必须存在，且名称类不得有唯一约束。"""
+        """五个唯一约束必须存在，且名称类不得有唯一约束。"""
         ensure_schema(store, embedding_dim=512, rebuild_fulltext=False)
         rows = store.run("SHOW CONSTRAINTS YIELD name, labelsOrTypes, properties "
                          "RETURN name, labelsOrTypes, properties")
@@ -165,25 +164,22 @@ class TestSchema:
             expected = statement.split("CONSTRAINT ")[1].split(" ")[0]
             assert expected in names, f"缺少约束 {expected}"
 
-        # 名称绝不能有唯一约束（SKILL §3.3）
+        # 名称绝不能有唯一约束
         for row in rows:
             props = row["properties"] or []
             assert "name" not in props and "preferred_name" not in props, (
-                f"约束 {row['name']} 把名称当成了身份，违反 SKILL §3.3"
+                f"约束 {row['name']} 把名称当成了身份，名称不应作为唯一键"
             )
 
     def test_cjk_analyzer_availability_is_observable(self, store):
-        """测试：CJK分析器可用性为可观测。"""
         analyzers = available_analyzers(store)
         assert analyzers, "应能列出可用分析器"
-        # 不断言 cjk 一定存在：设计 §2.2.4 要求实测而非假设
+        # 不断言 cjk 一定存在：要求实测而非假设
         assert isinstance(analyzers, set)
 
 
 class TestRunLifecycle:
-    """测试类：覆盖「RunLifecycle」相关行为。"""
     def test_building_run_is_not_active(self, store, clean_test_scope):
-        """测试：构建中run为不现行。"""
         run = run_store.start_run(store, settings_snapshot={"k": 1}, notes="itest")
         # start_run 生成的 run_id 不带 itest- 前缀，改用显式清理
         store.run("MATCH (r:IngestRun {run_id: $id}) SET r.run_id = $new",
@@ -191,7 +187,7 @@ class TestRunLifecycle:
         assert run.status == "BUILDING"
 
     def test_failed_run_keeps_previous_active(self, store, clean_test_scope, isolated_active_run):
-        """SKILL §3.7：新 run 失败时旧 ACTIVE 继续服务。"""
+        """新 run 失败时旧 ACTIVE 继续服务。"""
         old = "itest-run-old"
         new = "itest-run-new"
         store.run("CREATE (:IngestRun {run_id: $id, status: 'ACTIVE', created_at: '2026-01-01'})", id=old)
@@ -204,7 +200,6 @@ class TestRunLifecycle:
         assert status == "FAILED"
 
     def test_activate_is_atomic_single_active(self, store, clean_test_scope, isolated_active_run):
-        """测试：激活为原子单个现行。"""
         old, new = "itest-run-a", "itest-run-b"
         store.run("CREATE (:IngestRun {run_id: $id, status: 'ACTIVE', created_at: '2026-01-01'})", id=old)
         store.run("CREATE (:IngestRun {run_id: $id, status: 'BUILDING', created_at: '2026-01-02'})", id=new)
@@ -218,21 +213,19 @@ class TestRunLifecycle:
         assert [r["id"] for r in actives] == [new], "同一时刻只能有一个 ACTIVE"
 
     def test_cannot_activate_non_building_run(self, store, clean_test_scope):
-        """测试：不能激活非构建中run。"""
         store.run("CREATE (:IngestRun {run_id: 'itest-run-c', status: 'FAILED', created_at: '2026-01-01'})")
         with pytest.raises(run_store.RunStateError):
             run_store.activate(store, "itest-run-c", quality_report={})
 
     def test_graph_revision_not_based_on_node_count(self, store, clean_test_scope, isolated_active_run):
-        """设计 §2.2.2-D：改名/改证据时节点数不变，缓存键必须仍然变化。"""
+        """改名/改证据时节点数不变，缓存键必须仍然变化。"""
         revision = run_store.graph_revision(store)
         assert isinstance(revision, str) and revision
 
 
 class TestAssertionsAndProjection:
-    """测试类：覆盖「AssertionsAndProjection」相关行为。"""
     def test_cross_chunk_fact_and_projection(self, store, clean_test_scope):
-        """SKILL §14.3-1/-5：两个 Chunk 共同构成一条事实，且能投影为类型化边。"""
+        """两个 Chunk 共同构成一条事实，且能投影为类型化边。"""
         run_id = "itest-run-proj"
         seeded = _seed(store, run_id)
         settings = seeded["settings"]
@@ -301,7 +294,7 @@ class TestAssertionsAndProjection:
         assert all(e["ps"] is not None for e in edges), "投影边必须带页码 provenance"
 
     def test_same_name_different_type_never_cross_linked(self, store, clean_test_scope):
-        """SKILL §14.3-2：同名不同类型实体不得错误连边。
+        """同名不同类型实体不得错误连边。
 
         旧实现用 MATCH (n {name}) 无类型匹配，「呕吐」同时是 主治/功效/禁忌/概念，
         会产生笛卡尔积连边。新实现按 canonical_id 定位，结构上不可能发生。
@@ -334,7 +327,7 @@ class TestAssertionsAndProjection:
         assert linked[0]["t"] == "INDICATION"
 
     def test_accepted_assertion_without_evidence_is_rejected_at_write(self, store, clean_test_scope):
-        """SKILL §3.1 硬门槛：无可定位证据的 ACCEPTED 断言不得写入。"""
+        """硬门槛：无可定位证据的 ACCEPTED 断言不得写入。"""
         run_id = "itest-run-noevid"
         _seed(store, run_id)
         bad = _make_assertion(
@@ -349,7 +342,7 @@ class TestAssertionsAndProjection:
             assertion_store.upsert_assertions(store, [bad], batch_size=10)
 
     def test_write_is_idempotent(self, store, clean_test_scope):
-        """SKILL §5.5：所有写操作必须幂等。"""
+        """所有写操作必须幂等。"""
         run_id = "itest-run-idem"
         _seed(store, run_id)
         record = _make_assertion(
@@ -378,7 +371,6 @@ class TestAssertionsAndProjection:
         assert edges == 1, "重建投影不得产生重复边"
 
     def test_quality_report_gate(self, store, clean_test_scope):
-        """测试：质量报告门槛。"""
         run_id = "itest-run-quality"
         _seed(store, run_id)
         records = [

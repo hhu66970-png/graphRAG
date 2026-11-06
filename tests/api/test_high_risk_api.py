@@ -431,7 +431,6 @@ def test_unknown_method_is_rejected_before_any_retrieval(
 
 
 def test_missing_question_is_rejected(client, wire):
-    """测试：缺失问题为被拒绝。"""
     wire(rows=dosage_rows())
 
     response = client.post("/api/graphrag", json={"method": "auto"})
@@ -441,7 +440,7 @@ def test_missing_question_is_rejected(client, wire):
 
 
 # ---------------------------------------------------- 前端徽标一致性
-FRONTEND = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+FRONTEND = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "app.js"
 _MAP_BLOCK = re.compile(r"const (HR_STATUS_[A-Z]+)\s*=\s*\{(.*?)\};", re.S)
 _MAP_ENTRY = re.compile(r"'([a-z_]+)'\s*:\s*'([^']*)'")
 

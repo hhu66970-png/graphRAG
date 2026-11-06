@@ -4,9 +4,7 @@ param(
     [switch]$Detached
 )
 
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "GraphRAG Backend API" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 $pythonExe = & "$PSScriptRoot\scripts\resolve_python.ps1"
 
@@ -30,7 +28,7 @@ if ($Detached) {
     $env:PYTHONIOENCODING = "utf-8"
     $outLog = Join-Path $PSScriptRoot "backend.api.out.log"
     $errLog = Join-Path $PSScriptRoot "backend.api.err.log"
-    Write-Host "Starting detached backend (survives closing Cursor)..." -ForegroundColor Yellow
+    Write-Host "Starting backend in the background..." -ForegroundColor Yellow
     $proc = Start-Process -FilePath $pythonExe -ArgumentList "backend\api.py" `
         -WorkingDirectory $PSScriptRoot `
         -WindowStyle Hidden `
@@ -41,7 +39,7 @@ if ($Detached) {
         Write-Host "Failed to launch backend." -ForegroundColor Red
         exit 1
     }
-    Write-Host "Backend launched independently (PID $($proc.Id)). Close Cursor if you want; keep Neo4j running." -ForegroundColor Green
+    Write-Host "Backend started (PID $($proc.Id)). Keep Neo4j running." -ForegroundColor Green
     exit 0
 }
 

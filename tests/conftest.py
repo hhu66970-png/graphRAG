@@ -9,6 +9,9 @@ from neo4j import GraphDatabase
 
 load_dotenv()
 
+# Driver creation parses the URI during API import; it does not connect here.
+os.environ.setdefault("NEO4J_URL", "bolt://localhost:7687")
+
 
 @pytest.fixture(scope="session")
 def neo4j_driver():
@@ -37,7 +40,7 @@ def neo4j_connection_test(neo4j_driver):
 def clean_database(neo4j_driver):
     """Provide an empty database for tests that need one.
 
-    安全护栏（SKILL §3.7「禁止默认 DETACH DELETE 全库」）：
+    安全护栏：
     本 fixture 会清空整个数据库。若目标库里已有数据，默认**跳过测试**而不是删除——
     否则任何人执行一次 `pytest` 都会毁掉现网图谱。
 

@@ -1,6 +1,6 @@
 """Build the v2 evidence knowledge graph from the chunks already in Neo4j.
 
-管线（设计 §2.1 + §4，SKILL §3.1/§3.2/§3.7）：
+管线：
 
     ensure_schema
       -> start_run(BUILDING)
@@ -85,14 +85,13 @@ SET c.chunk_id       = row.chunk_id,
 
 
 class CachingLLMClient:
-    """Disk-cached wrapper around the real client (设计 §5 缓存键含版本).
+    """Disk-cached wrapper around the real client.
 
     缓存键 = sha256(purpose + prompt + schema 名 + prompt_version + schema_version)。
-    Prompt/Schema 版本一变缓存自动失效，符合 SKILL §3.7。
+    Prompt/Schema 版本变化时缓存失效。
     """
 
     def __init__(self, inner: OpenAICompatibleClient, settings: KGSettings) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._inner = inner
         self._settings = settings
         self._lock = threading.Lock()
@@ -133,7 +132,6 @@ class LockedResolver:
     """Thread-safe facade over EntityResolver (AliasStore 是共享可变状态)."""
 
     def __init__(self, inner: EntityResolver) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._inner = inner
         self._lock = threading.Lock()
 
@@ -146,7 +144,7 @@ class LockedResolver:
 def load_chunks(
     store: Neo4jStore, limit: int | None
 ) -> tuple[list[ChunkRecord], dict[str, int]]:
-    """Load chunks and attach herb-entry structure (设计 §2.1.2-D)。
+    """Load chunks and attach herb-entry structure 。
 
     entry_id 由 ingest.structure 从 OCR 版式识别（药名 + 拼音（《典籍》）），
     是跨块补全的主依据；识别不到条目的前言/总论块 entry_id 为 None。
@@ -208,7 +206,6 @@ def migrate_chunks(
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Build the v2 evidence KG")
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个文本块")
@@ -279,7 +276,7 @@ def main() -> int:
                               f"| 缓存命中 {llm.hits} | LLM 调用 {llm.usage.calls} "
                               f"| 失败块 {len(failed_chunks)}", flush=True)
 
-        # ---- I3 跨块补全（设计 §2.1.1-3）--------------------------------
+        # ---- I3 跨块补全--------------------------------
         # 只补「该条目锚点药在该块尚无断言」的块：教材条目里大量句子省略主语
         # （「本品味辛性凉…」），逐块抽取会丢掉或错认，补全把它们归回锚点药。
         cross_added = 0

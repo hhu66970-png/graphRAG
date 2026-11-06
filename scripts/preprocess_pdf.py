@@ -89,7 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     args = build_parser().parse_args()
     pdf_path = args.pdf.expanduser().resolve()
     output_path = args.output.expanduser().resolve()

@@ -1,11 +1,8 @@
-"""Typed serving projection rebuilt from the assertion layer (设计 §4.2).
+"""从 Assertion 层重建类型化 Serving 边。
 
-检索侧需要「快」，所以把 `ACTIVE + ACCEPTED` 的断言投影成类型化直接边；
-但审计、版本、冲突与多来源仍由 Assertion 层承担。Serving Edge 是**可重建的派生物**，
-不是事实源——这正是建图文档与检索文档冲突的化解方式。
-
-关系类型只能来自本体白名单：先用 Ontology 校验，再按谓词分组拼接语句
-（SKILL §9.2 允许的唯一动态拼接方式），杜绝把模型输出直接拼进 Cypher。
+仅投影 ACTIVE 批次中 ACCEPTED、POSITIVE 的断言。版本、冲突和完整来源
+保留在 Assertion 层，Serving 边用于检索，可随时重建。
+关系类型经过本体白名单校验后才拼入 Cypher；其余值通过参数传入。
 """
 
 from __future__ import annotations
@@ -15,7 +12,7 @@ from collections import defaultdict
 from ..domain.ontology import Ontology
 from .neo4j_store import Neo4jStore
 
-# 每条 Serving Edge 携带的证据摘要（设计 §4.2 边属性）
+# 每条 Serving Edge 携带的证据摘要
 _PROJECT_TEMPLATE = """
 UNWIND $batch AS row
 MATCH (s:Entity {{canonical_id: row.subject_id}})

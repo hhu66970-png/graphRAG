@@ -1,9 +1,6 @@
-"""Frozen public data contracts for the KG construction pipeline (SKILL §6).
+"""建图与检索共用的数据模型。
 
-字段名一旦冻结不得自行改名；任何公共字段变更都属于契约变更，
-需 ADR（SKILL §15）。建图侧契约与检索层 EvidencePacket 集中在这里，
-避免 API、评测和结构化层各自
-复制字段定义。
+模型字段由 API、存储和评测共同使用；修改公共字段时需同步检查调用方与持久化数据。
 """
 
 from __future__ import annotations
@@ -21,17 +18,16 @@ LinkMethod = Literal["exact_alias", "longest_match", "character_candidate", "vec
 
 
 class _Base(BaseModel):
-    """_Base：本模块内部使用的数据结构。"""
     model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
 
 
 class ChunkRecord(_Base):
-    """检索/抽取单元。SKILL §6.1 冻结字段。"""
+    """检索/抽取单元。冻结字段。"""
 
     chunk_id: str
     document_id: str
     parent_chunk_id: str | None = None
-    entry_id: str | None = None          # 药物条目 ID，跨块补全的主依据（设计 §2.1.2-D）
+    entry_id: str | None = None          # 药物条目 ID，跨块补全的主依据
     section_path: list[str] = Field(default_factory=list)
     order_in_entry: int | None = None
     text: str                            # 原文，证据定位以此为准
@@ -52,7 +48,7 @@ class ChunkRecord(_Base):
 
 
 class EntityRecord(_Base):
-    """规范实体。身份是 canonical_id，不是 name（SKILL §3.3 / §6.2）。"""
+    """规范实体。身份是 canonical_id，不是 name。"""
 
     canonical_id: str
     entity_type: str
@@ -66,7 +62,7 @@ class EntityRecord(_Base):
 
 
 class DosageValue(_Base):
-    """剂量值对象（设计 §2.1.2-C）：必须保存标准化数值与条件，不能只存字符串。"""
+    """剂量值对象：必须保存标准化数值与条件，不能只存字符串。"""
 
     value_min: float | None = None
     value_max: float | None = None
@@ -77,7 +73,7 @@ class DosageValue(_Base):
 
 
 class EvidenceSpan(_Base):
-    """证据定位结果（设计 §2.1.2-B）。"""
+    """证据定位结果。"""
 
     evidence_quote: str                  # 逐字原句，来自 chunk.text
     evidence_start: int | None = None
@@ -92,11 +88,11 @@ class EvidenceSpan(_Base):
 
 
 class ValidationResult(_Base):
-    """把「规则分」与「最终决策值」彻底拆开（设计 §2.1.2-A）。
+    """把「规则分」与「最终决策值」彻底拆开。
 
     rule_score  : 确定性规则支持度，永远有值。
     llm_verdict : 未进入二次校验时为 NOT_RUN，不参与线性公式。
-    final_score : 规则与复核后的决策支持值；**不是事实正确概率**（SKILL §7.3）。
+    final_score : 规则与复核后的决策支持值；**不是事实正确概率**。
     """
 
     rule_score: float
@@ -108,9 +104,9 @@ class ValidationResult(_Base):
 
 
 class AssertionRecord(_Base):
-    """事实源层的一条断言。SKILL §6.3 冻结字段。
+    """事实源层的一条断言。冻结字段。
 
-    每条 ACCEPTED 断言必须有 chunk_ids、页码和可定位 evidence_quote（SKILL §3.1）。
+    每条 ACCEPTED 断言必须有 chunk_ids、页码和可定位 evidence_quote。
     """
 
     assertion_id: str
@@ -145,7 +141,7 @@ class AssertionRecord(_Base):
         return v
 
     def assert_publishable(self) -> None:
-        """ACCEPTED 断言的硬门槛（SKILL §3.1）。"""
+        """ACCEPTED 断言的硬门槛。"""
         if self.validation_status != "ACCEPTED":
             return
         if not self.evidence_quote or self.match_mode == "not_found":
@@ -155,7 +151,7 @@ class AssertionRecord(_Base):
 
 
 class EvidenceItem(_Base):
-    """One evidence-backed retrieval item (SKILL section 6.4)."""
+    """One evidence-backed retrieval item."""
 
     evidence_id: str
     claim_key: str | None = None

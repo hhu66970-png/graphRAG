@@ -125,7 +125,7 @@ def _path_score(path: dict) -> float:
     min_support = min(edge_scores, default=0.0)
     evidence_coverage = sum(bool(group) for group in groups) / edge_count
     length_decay = 1.0 / edge_count
-    # PathRAG-inspired ranking from design section 2.3.4. Endpoints and predicates have
+    # PathRAG-inspired ranking. Endpoints and predicates have
     # already passed exact entity linking and the ontology whitelist.
     return round(
         0.25

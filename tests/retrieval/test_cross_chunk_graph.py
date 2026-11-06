@@ -8,7 +8,6 @@ from graphragexpr.retrieval.cross_chunk_graph import (
 
 
 def test_merge_extra_chunks_keeps_hits_and_adds_other_pages():
-    """测试：合并额外文本块保留命中且加入其它页。"""
     ranked = [
         {"id": "c1", "text": "人参性味", "page_start": 378, "matched_terms": ["人参"]},
         {"id": "c2", "text": "相邻块", "page_start": 379, "matched_terms": ["相邻文本块"]},
@@ -28,7 +27,6 @@ def test_merge_extra_chunks_keeps_hits_and_adds_other_pages():
 
 
 def test_merge_extra_chunks_respects_context_limit():
-    """测试：合并额外文本块遵守上下文上限。"""
     ranked = [{"id": "c1", "text": "a"}]
     extra = [{"id": f"x{i}", "text": str(i)} for i in range(10)]
 
@@ -39,15 +37,12 @@ def test_merge_extra_chunks_respects_context_limit():
 
 
 def test_expand_prefers_serving_edges_and_other_chunk_text():
-    """测试：扩展更倾向Serving边且其它文本块文本。"""
     class FakeResult(list):
-        """FakeResult：测试替身，用来隔离真实 Neo4j 或 LLM。"""
         def single(self):
             """测试替身：返回唯一记录。"""
             return self[0] if self else None
 
     class FakeSession:
-        """FakeSession：测试替身，用来隔离真实 Neo4j 或 LLM。"""
         def run(self, cypher, **params):
             """测试替身：按 Cypher 参数返回预制的 FakeResult。"""
             if params.get("predicates") is not None:
@@ -116,9 +111,7 @@ def test_expand_prefers_serving_edges_and_other_chunk_text():
 
 
 def test_expand_falls_back_to_legacy_cross_chunk_when_no_serving_graph():
-    """测试：扩展回退回到旧跨文本块当没有Serving图。"""
     class FakeSession:
-        """FakeSession：测试替身，用来隔离真实 Neo4j 或 LLM。"""
         def run(self, cypher, **params):
             """测试替身：按 Cypher 参数返回预制的 FakeResult。"""
             if params.get("audit"):
@@ -170,15 +163,12 @@ def test_expand_falls_back_to_legacy_cross_chunk_when_no_serving_graph():
 
 
 def test_expand_also_follows_incompatible_assertions():
-    """测试：扩展也跟随配伍禁忌断言。"""
     class FakeResult(list):
-        """FakeResult：测试替身，用来隔离真实 Neo4j 或 LLM。"""
         def single(self):
             """测试替身：返回唯一记录。"""
             return self[0] if self else None
 
     class FakeSession:
-        """FakeSession：测试替身，用来隔离真实 Neo4j 或 LLM。"""
         def run(self, cypher, **params):
             """测试替身：按 Cypher 参数返回预制的 FakeResult。"""
             if params.get("predicates") is not None:
@@ -242,7 +232,6 @@ def test_expand_also_follows_incompatible_assertions():
 
 
 def test_audit_relationship_types_are_not_traversed():
-    """测试：审计关系类型不被遍历。"""
     assert "FROM_CHUNK" in AUDIT_REL_TYPES
     assert "EVIDENCED_BY" in AUDIT_REL_TYPES
     assert "HAS_EFFICACY" not in AUDIT_REL_TYPES

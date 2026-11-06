@@ -64,7 +64,6 @@ def _entity(name: str, entity_type: str, suffix: str) -> dict:
     ],
 )
 def test_route_query_covers_all_intents(question, entities, intent, structure_type):
-    """测试：路由查询覆盖全部意图。"""
     plan = route_query(question, entities)
 
     assert plan.intent == intent
@@ -74,7 +73,6 @@ def test_route_query_covers_all_intents(question, entities, intent, structure_ty
 
 
 def test_compare_rule_precedes_two_entity_path_rule():
-    """测试：对比规则优先于两实体路径规则。"""
     entities = [
         _entity("人参", "HERB", "renshen"),
         _entity("黄芪", "HERB", "huangqi"),
@@ -87,7 +85,6 @@ def test_compare_rule_precedes_two_entity_path_rule():
 
 
 def test_reverse_wording_precedes_a_generic_herb_link():
-    """测试：reverse问法优先于泛化中药链接。"""
     entities = [
         _entity("中药", "HERB", "generic-herb"),
         _entity("大补元气", "EFFICACY", "dabu-yuanqi"),
@@ -100,7 +97,6 @@ def test_reverse_wording_precedes_a_generic_herb_link():
 
 
 def test_high_risk_words_force_provenance_without_inventing_safety_intent():
-    """测试：高风险词强制溯源没有发明安全/拒答意图。"""
     plan = route_query(
         "附子的用量和禁忌是什么？",
         [_entity("附子", "HERB", "fuzi")],
@@ -114,7 +110,6 @@ def test_high_risk_words_force_provenance_without_inventing_safety_intent():
 
 
 def test_path_is_bounded_to_three_hops():
-    """测试：路径为有上限到三跳。"""
     plan = route_query(
         "麻黄通过什么关系影响咳嗽？",
         [
@@ -129,7 +124,6 @@ def test_path_is_bounded_to_three_hops():
 
 
 def test_two_herbs_without_compare_words_still_retrieve_both():
-    """测试：两中药没有对比词仍然检索两个。"""
     plan = route_query(
         "人参和黄芪的性味功效是什么？",
         [
@@ -145,7 +139,6 @@ def test_two_herbs_without_compare_words_still_retrieve_both():
 
 
 def test_reverse_with_two_constraints_becomes_intersection():
-    """测试：reverse带两约束变成交集。"""
     plan = route_query(
         "哪些药具有清热解毒和凉血功效？",
         [
@@ -159,7 +152,6 @@ def test_reverse_with_two_constraints_becomes_intersection():
 
 
 def test_shared_incompatibility_routes_both_herbs():
-    """测试：共同的配伍禁忌路由到两个中药。"""
     plan = route_query(
         "人参和麻黄均不能同时和什么药搭配使用",
         [
@@ -175,7 +167,6 @@ def test_shared_incompatibility_routes_both_herbs():
 
 
 def test_single_herb_incompatibility_stays_attr():
-    """测试：单个中药配伍禁忌保持为属性意图。"""
     plan = route_query(
         "人参不宜与什么药同用？",
         [_entity("人参", "HERB", "renshen")],
@@ -187,13 +178,11 @@ def test_single_herb_incompatibility_stays_attr():
 
 
 def test_blank_question_is_rejected():
-    """测试：空白问题为被拒绝。"""
     with pytest.raises(ValueError, match="question"):
         route_query("  ", [])
 
 
 def test_evidence_packet_contract_is_strict():
-    """测试：证据证据包契约为严格。"""
     item = EvidenceItem(
         evidence_id="a1",
         evidence_quote="原文",

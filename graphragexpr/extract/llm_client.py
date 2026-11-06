@@ -1,8 +1,8 @@
-"""Unified LLM client (SKILL §8).
+"""Unified LLM client.
 
 业务模块一律通过本模块调用大模型，不得自行拼 HTTP 请求。提供：超时、指数退避、
 最大重试、严格 JSON 校验、token 统计、request_id、版本标记、失败清单、可替换供应商。
-测试使用 FakeLLMClient，不依赖在线 API（SKILL §8.6）。
+测试使用 FakeLLMClient，不依赖在线 API。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LLMUsage:
-    """Token 与调用计数，用于成本核算（SKILL §8）。"""
+    """Token 与调用计数，用于成本核算。"""
 
     calls: int = 0
     prompt_tokens: int = 0
@@ -40,7 +40,6 @@ class LLMUsage:
 
 @dataclass
 class LLMFailure:
-    """LLMFailure：本文件定义的数据结构或组件。"""
     request_id: str
     purpose: str
     attempts: int
@@ -118,14 +117,13 @@ class _BaseClient:
     """Shared retry / validation logic."""
 
     def __init__(self, settings: KGSettings) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._settings = settings
         self.usage = LLMUsage()
         self.failures: list[LLMFailure] = []
         self.truncation_recoveries = 0
 
     def _validate(self, text: str, schema: type[BaseModel], request_id: str) -> BaseModel:
-        """Strict JSON parsing. 禁止从自然语言里正则猜字段作为正式结果（SKILL §8.2）。
+        """Strict JSON parsing. 禁止从自然语言里正则猜字段作为正式结果。
 
         唯一的例外是**输出被长度上限截断**：此时返回的仍是机器生成的合法 JSON 前缀，
         只是结尾不完整。这种情况下抢救已完整的元素，比整块丢弃更符合「不隐藏失败」
@@ -170,7 +168,7 @@ class _BaseClient:
                 text = call()
                 return self._validate(text, schema, request_id)
             except LLMContractError as exc:
-                # 重试不得改变事实语义，只重试同一请求（SKILL §8.5）
+                # 重试不得改变事实语义，只重试同一请求
                 last_error = str(exc)
                 logger.warning(
                     "llm_contract_error", extra={"request_id": request_id,
@@ -197,7 +195,6 @@ class OpenAICompatibleClient(_BaseClient):
     """OpenAI-compatible chat completion provider (DeepSeek 等)."""
 
     def __init__(self, settings: KGSettings, *, client: Any | None = None) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         super().__init__(settings)
         if client is not None:
             self._client = client
@@ -206,7 +203,7 @@ class OpenAICompatibleClient(_BaseClient):
 
             token = os.getenv("LLM_TOKEN")
             if not token:
-                raise RuntimeError("缺少 LLM_TOKEN；密钥只从环境变量读取（SKILL §3.8）")
+                raise RuntimeError("缺少 LLM_TOKEN；密钥只从环境变量读取")
             self._client = OpenAI(
                 api_key=token,
                 base_url=os.getenv("LLM_ENDPOINT") or None,
@@ -240,13 +237,12 @@ class OpenAICompatibleClient(_BaseClient):
 
 @dataclass
 class FakeLLMClient(_BaseClient):
-    """Deterministic client for tests (SKILL §8.6)。按 purpose 返回预置响应。"""
+    """Deterministic client for tests 。按 purpose 返回预置响应。"""
 
     responses: dict[str, list[str]] = field(default_factory=dict)
     settings: KGSettings = field(default_factory=KGSettings)
 
     def __post_init__(self) -> None:
-        """数据类实例创建后做校验或补默认值。"""
         _BaseClient.__init__(self, self.settings)
         self._cursor: dict[str, int] = {}
         self.seen: list[tuple[str, str]] = []

@@ -134,7 +134,6 @@ def export_bundle(output: Path, *, active_only: bool = False) -> Path:
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     parser = argparse.ArgumentParser(description="Export Neo4j GraphRAG bundle")
     parser.add_argument(
         "--output",

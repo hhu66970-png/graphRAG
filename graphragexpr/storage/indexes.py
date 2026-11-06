@@ -1,13 +1,8 @@
-"""Constraints and indexes (SKILL §9.3).
+"""Neo4j 约束与索引。
 
-必须存在的唯一约束：
-    Entity.canonical_id / Chunk.chunk_id / Assertion.assertion_id
-    Document.document_id / IngestRun.run_id
-
-**名称只建普通索引，绝不建身份唯一约束**——这是旧图 506 个同名跨类型实体
-与 22.6% 冗余边的直接教训，也是 SKILL §3.3 的硬性要求。
-
-向量索引维度必须与运行时模型维度一致；不一致直接失败，不得静默降级（§9.3）。
+Entity、Chunk、Assertion、Document 和 IngestRun 使用各自的稳定 ID 作为唯一键。
+实体名称只建普通索引，允许不同类型的实体同名。
+向量索引维度与运行时模型维度不一致时抛出异常。
 """
 
 from __future__ import annotations
@@ -122,5 +117,5 @@ def check_vector_dimension(store: Neo4jStore, *, index_name: str, expected: int)
     if actual is not None and int(actual) != int(expected):
         raise RuntimeError(
             f"向量索引维度不一致：索引 {actual}，运行时模型 {expected}。"
-            "SKILL §9.3 要求直接失败，不得静默降级。"
+            "请使索引维度与嵌入模型保持一致。"
         )

@@ -1,7 +1,7 @@
-"""Stable identifier construction (总体设计 §5).
+"""Stable identifier construction.
 
-所有 ID 必须可复现：相同输入永远得到相同 ID。
-禁止使用数组顺序、Neo4j 内部 elementId 或自增序号作为跨版本外部 ID（SKILL §7.1）。
+实体、文本块与事实 ID 由输入内容生成；批次 ID 使用时间前缀和随机后缀。
+禁止使用数组顺序、Neo4j 内部 elementId 或自增序号作为跨版本外部 ID。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ _PUNCT_MAP = str.maketrans({
 def normalize_text(value: str) -> str:
     """Normalize text for hashing and matching.
 
-    只用于生成稳定 ID 与做规范化匹配；**不得覆盖原始证据文本**（SKILL §7.2）。
+    只用于生成稳定 ID 与做规范化匹配；**不得覆盖原始证据文本**。
     """
     if not value:
         return ""
@@ -63,7 +63,7 @@ def mention_id(chunk: str, start: int, end: int, surface: str) -> str:
 def canonical_id(entity_type: str, key: str) -> str:
     """canonical_id = TYPE + ':' + stable_hash(normalized_key).
 
-    身份只认 canonical_id，不认展示名（SKILL §3.3）。key 通常是规范化后的
+    身份只认 canonical_id，不认展示名。key 通常是规范化后的
     首选名；一旦某实体确定了 canonical_id，改展示名不会改变身份。
     """
     return f"{entity_type}:{_sha(entity_type, normalize_text(key), length=16)}"
@@ -76,7 +76,7 @@ def fact_key(
     qualifiers: dict | None = None,
     polarity: str = "POSITIVE",
 ) -> str:
-    """同一事实的稳定键；多条证据可指向同一 fact_key（总体设计 §4.1）。"""
+    """同一事实的稳定键；多条证据可指向同一 fact_key。"""
     normalized_qualifiers = ";".join(
         f"{k}={normalize_text(str(v))}" for k, v in sorted((qualifiers or {}).items())
     )
@@ -89,5 +89,5 @@ def assertion_id(fact: str, chunk: str, span: tuple[int | None, int | None], sch
 
 
 def new_run_id() -> str:
-    """时间前缀 + 随机后缀，单调可排序（SKILL §7.1 要求 ULID/UUIDv7 类）。"""
+    """时间前缀 + 随机后缀，单调可排序。"""
     return f"{int(time.time() * 1000):013d}-{uuid.uuid4().hex[:12]}"

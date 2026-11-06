@@ -1,16 +1,12 @@
-flask>=3.1,<4
-flask-cors>=5,<7
-neo4j>=6,<7
-neo4j-graphrag>=1.19,<2
-networkx>=3.4,<4
-numpy>=2,<3
-openai>=3,<4
-pydantic>=2.12,<3
-python-dotenv>=1.1,<2
-pyvis>=0.3,<1
-PyMuPDF>=1.27,<2
-rapidocr_onnxruntime>=1.4,<2
+-r requirements/base.txt
+
+# Local embeddings
 sentence-transformers>=5.1,<6
 torch>=2.8,<3
-pytest>=9,<10
-pytest-cov>=6,<8
+
+# PDF rendering and OCR
+PyMuPDF>=1.27,<2
+rapidocr_onnxruntime>=1.4,<2
+
+# Legacy retrieval scripts
+neo4j-graphrag>=1.19,<2

@@ -361,7 +361,7 @@ def _object_key(unit: ConditionalEvidenceUnit) -> str:
 def severity_conflicts(units: list[ConditionalEvidenceUnit]) -> dict[str, str]:
     """同一对象、同一人群下出现不一致的限制程度时，返回冲突说明。
 
-    任务书要求「条件冲突的单元并列保留，不取平均、不求并集」；这里再加一条：
+    条件冲突的单元并列保留，不取平均、不求并集。另需注意：
     **也不替用户按更严的一档表述**。两处来源程度不同而未经人工裁定时，
     把它们并列摆出来并标明冲突，而不是自行挑一档当作已经核验的结论。
 

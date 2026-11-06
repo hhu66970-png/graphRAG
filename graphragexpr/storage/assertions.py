@@ -1,10 +1,10 @@
-"""Assertion / Evidence graph writes — the fact source (设计 §4.1, SKILL §3.2).
+"""Assertion / Evidence graph writes — the fact source.
 
 事实源是 Assertion，而不是实体间直接边。每条 ACCEPTED 断言都必须带
 chunk_ids、页码与可定位 evidence_quote；同一事实可以有多条断言/证据，
 冲突事实不互相覆盖。
 
-所有写入按 UNWIND 批量执行且幂等（SKILL §9.2 / §5.5）。
+所有写入按 UNWIND 批量执行且幂等。
 """
 
 from __future__ import annotations
@@ -158,7 +158,7 @@ def upsert_assertions(
     now = datetime.now(timezone.utc).isoformat()
     rows = []
     for a in assertions:
-        a.assert_publishable()  # SKILL §3.1 硬门槛
+        a.assert_publishable()  # 硬门槛
         rows.append(
             {
                 "assertion_id": a.assertion_id,
@@ -193,7 +193,7 @@ def upsert_assertions(
 
 
 def quality_report(store: Neo4jStore, run_id: str) -> dict:
-    """Compute the publication gate metrics for one run (设计 §9.3)."""
+    """Compute the publication gate metrics for one run."""
     rows = store.run(
         """
         MATCH (a:Assertion {run_id: $run_id})

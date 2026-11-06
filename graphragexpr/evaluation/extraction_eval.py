@@ -1,4 +1,4 @@
-"""Extraction quality metrics against the structured-field reference (设计 §9.2).
+"""Extraction quality metrics against the structured-field reference.
 
 指标口径（必须连同数字一起引用，否则会被误读）：
 
@@ -6,9 +6,9 @@
 - **Precision@field**：图谱给出的取值里，有多少落在教材字段内。**这是下界**——
   图谱合理地包含字段之外的事实（【应用】段落、其它章节交叉引用），
   它们不在字段里但并不算错，因此真实精确率高于此值。
-- 两者都**不是**「事实正确概率」（SKILL §7.3）。
+- 两者都**不是**「事实正确概率」。
 
-evaluation 层只读各层公开接口，不复制业务逻辑（SKILL §5）。
+evaluation 层只读各层公开接口，不复制业务逻辑。
 """
 
 from __future__ import annotations
@@ -44,7 +44,6 @@ RETURN collect(a.object_value_json) AS values
 
 @dataclass
 class FieldScore:
-    """FieldScore：本文件定义的数据结构或组件。"""
     predicate: str
     gold: int = 0
     predicted: int = 0
@@ -251,7 +250,7 @@ def sweep_thresholds(
     scored: list[dict],
     thresholds: list[float],
 ) -> list[dict]:
-    """Recompute Recall/Precision@field at each acceptance threshold (设计 §2.1.2-E).
+    """Recompute Recall/Precision@field at each acceptance threshold.
 
     离线标定：断言已带 `final_score`，无需重跑抽取即可扫描阈值。
     这正是文档要求的「先画曲线再冻结阈值」，而不是把 0.60 直接写进报告。

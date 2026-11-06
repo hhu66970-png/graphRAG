@@ -167,7 +167,6 @@ def import_bundle(bundle: Path, *, clear: bool) -> None:
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     parser = argparse.ArgumentParser(description="Import GraphRAG Neo4j bundle")
     parser.add_argument(
         "--bundle",

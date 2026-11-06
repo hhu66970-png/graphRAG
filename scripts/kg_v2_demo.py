@@ -152,7 +152,6 @@ def extract_demo(store: Neo4jStore, keyword: str, limit: int) -> None:
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Legacy KG audit + v2 extraction demo")
     parser.add_argument("--audit", action="store_true", help="审计旧图缺陷")

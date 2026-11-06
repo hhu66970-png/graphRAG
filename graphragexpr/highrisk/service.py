@@ -1,25 +1,9 @@
-"""高风险问答编排：读取 → 单元 → 候选 → 核验 → 状态（任务书 §3、§6、§10）。
+"""高风险问答：读取证据、组装条件单元、核验候选结论并生成回答。
 
-为什么独立成一个服务
---------------------
-任务书 §3 要求把三类高风险关系「集中为可测试的独立服务／策略模块」，
-而不是分散在各检索模式的分支里各写一遍。这样做的直接好处是：
-
-- 只有一处决定「证据不足怎么办」，不会出现某个模式悄悄绕过核验；
-- 可以用 `FakeLLMClient` 做确定性测试，不依赖真实模型与真实数据库；
-- 接口层只负责把结果装进既有响应契约，不承担安全判断。
-
-硬性约束（本模块的实现方式）
-----------------------------
-1. **没有最终核验就不出结论**。任何路径都必须经过 `verify.verify_claims`。
-2. **模型不写最终文字**。最终文本由 `render` 从已核验单元模板化生成，
-   模型只提交待核验的候选结论。
-3. **条件与数值一起裁剪**。token 预算按**整单元**裁剪，绝不保留数值却丢弃其条件
-   （任务书 §5）；被裁掉的单元同时从可引用集合移除，防止引用悬空。
-4. **降级要出声**。弃权、仅来源、部分成立都在 `coverage_notes` 与
-   `sub_questions[].reason` 里写明原因，不静默变成一句「未检索到」。
-
-只读：不写任何数据，不建图，不发布批次。
+三类风险共用同一套核验流程。模型仅提供候选结论，最终文字由 render
+根据核验结果生成；证据不足时在 coverage_notes 和子问题状态中说明原因。
+上下文预算按完整单元裁剪，数值、条件与引用一起保留或移除。
+本服务只读数据，不参与建图或批次发布。
 """
 
 from __future__ import annotations
@@ -172,7 +156,7 @@ def is_high_risk_question(question: str, *, plan: object | None = None) -> bool:
             保证与既有路由判定一致；没有 plan（如纯关键词图模式）时按词表自行判断。
 
     Returns:
-        是否走高风险核验链路。这是**叠加策略**，不改变六意图枚举（任务书 §1）。
+        是否走高风险核验链路。这是**叠加策略**，不改变六意图枚举。
 
     Side effects: 无。
     """
@@ -341,7 +325,7 @@ def _trim_units(
 
     关键：裁剪的单位是单元而不是字段。数值、单位、用法、生制品、人群、限制程度
     同属一个单元，要么整条保留，要么整条移出可引用集合——不会出现
-    「保留了剂量却丢掉了它的慎用程度」（任务书 §5）。
+    「保留了剂量却丢掉了它的慎用程度」。
 
     Args:
         units: 候选单元。
@@ -509,7 +493,6 @@ class HighRiskService:
         assertion_limit: int = DEFAULT_ASSERTION_LIMIT,
         unit_token_budget: int = DEFAULT_UNIT_TOKEN_BUDGET,
     ) -> None:
-        """初始化该对象，保存后续调用所需的配置或依赖。"""
         self._store = store
         self._run_id = run_id
         self._llm = llm
@@ -532,7 +515,6 @@ class HighRiskService:
             )
         # 没有识别出药物主语时，**只有明确的反向枚举问法**才允许按
         # 「人群／病证约束」反向读取，例如「孕妇禁用的中药有哪些」。
-        #
         # 这条兜底曾经对任何无主语问题都生效，于是「布洛芬孕妇能吃吗？」
         # 会把徐长卿、千金子、厚朴的孕妇禁忌当作答案端出来，还标 grounded。
         # 反向读取是正当功能，但只对「列出满足条件的一组对象」这种问法正当；
@@ -831,7 +813,6 @@ class HighRiskService:
         # 拦下的单元仍以原文形式留在 `evidence_units` 里供核对，但不得进入
         # `claims`，也不得进入结论文本——否则「孕妇慎用」会继续以结论的样子
         # 出现在「哺乳期能否使用」的回答里。
-        #
         # 展示顺序按限制程度从重到轻，使「禁用」与「慎用」一眼可分；
         # 只改顺序，不改内容，也不把不同程度合并。
         presentable_ids = {
@@ -840,7 +821,7 @@ class HighRiskService:
             if item.status in (AnswerStatus.GROUNDED, AnswerStatus.PARTIAL_GROUNDED)
             for unit_id in item.unit_ids
         }
-        # 第三部分：问题条件相关性选择（任务书 §2）。只作用于**展示**：
+        # 问题条件相关性选择。只作用于**展示**：
         # 检索、两层核验与状态判定都已经在各自的位置完成，这里只回答
         # 「哪些证据是对本题明说的条件说的」。
         relevance_map = _relevance_map(sub_outcomes, units_by_id)
@@ -1119,7 +1100,7 @@ def _overall_status(sub_outcomes: list[SubQuestionOutcome]) -> AnswerStatus:
     """Fold per-sub-question states into one overall state.
 
     只有每个子问题都成立才是 `grounded`——「问了三件事答上两件」必须如实
-    表达为部分成立，不能被一句笼统的完整回答盖过去（任务书 §6）。
+    表达为部分成立，不能被一句笼统的完整回答盖过去。
     """
     if not sub_outcomes:
         return AnswerStatus.ABSTAIN
@@ -1237,7 +1218,7 @@ def _compose_answer(
     sub_outcomes: list[SubQuestionOutcome],
     subject_gap_lines: list[str] | None = None,
 ) -> tuple[str, list[AnswerBlock]]:
-    """按状态组装最终文字与展示分块（任务书第三部分 §7）。
+    """按状态组装最终文字与展示分块。
 
     返回 `(answer_text, blocks)`：两者描述**同一批内容**。`answer_text` 供
     不解析分块的调用方使用（接口契约、评测脚本），`blocks` 供前端按种类套样式。

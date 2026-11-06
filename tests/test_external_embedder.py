@@ -4,7 +4,6 @@ from external_embedder import ExternalEmbedder
 
 
 def test_explicit_hash_provider_is_available_for_tests(monkeypatch):
-    """测试：显式哈希提供方为可用用于测试。"""
     monkeypatch.setenv("EMBED_PROVIDER", "hash")
     monkeypatch.setenv("EMBED_DIM", "32")
 

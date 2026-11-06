@@ -885,11 +885,9 @@ def _high_risk_client():
 
 
 # ---- 接口层的调用顺序策略 ------------------------------------------------
-#
-# 高风险问题的顺序约束（任务书 §10）：**先检索、再统一核验、最后程序化文字**。
+# 高风险问题的顺序约束：**先检索、再统一核验、最后程序化文字**。
 # 普通自由文本生成一步都不跑——先跑再丢掉既浪费一次模型调用，又让高风险答案
 # 的可用性无谓地取决于普通 LLM 是否可用（它抛异常就会变成 HTTP 500）。
-#
 # 另外三点同样必须靠接口层保证：
 #   1. 核验层异常时，`answer` 必须被**替换**为原文展示或拒答文本，绝不能把未经
 #      核验的自由文本照原样返回；
@@ -915,7 +913,7 @@ _VERIFICATION_UNAVAILABLE = "verification_unavailable"
 #:   - 检索命中的原文只在**核验不可用时**被照录展示（逐条 `verified: false`），
 #:     不是结论的证据。
 #: 也就是说：换 method 会换检索结果与定位，但只要解析出的实体相同，最终证据单元
-#: 与结论就相同。本任务**不**声称原生 method 直接决定最终证据。
+#: 与结论就相同。原生 method 只参与前置定位。
 _EVIDENCE_METHOD = "high_risk_assertion"
 
 #: auto 家族：走 `retrieve()` 管线（含意图路由，其 `route.is_high_risk` 与词表
@@ -975,7 +973,7 @@ def _neo4j_store():
 
 
 def _is_high_risk_question(question):
-    """是否走高风险链路。词表判定是**叠加策略**，不改六意图枚举（任务书 §1）。"""
+    """是否走高风险链路。词表判定是**叠加策略**，不改六意图枚举。"""
     from graphragexpr.highrisk import is_high_risk_question
 
     return is_high_risk_question(question)
@@ -1116,7 +1114,7 @@ def _high_risk_answer(question, retrieval):
     """把所选 method 的检索结果交给**唯一**的高风险证据组织与核验入口。
 
     检索方式各不相同，核验入口只有一个：只要有一种方式能绕过核验，用户就可以
-    靠换 method 拿到未经核验的高风险结论（任务书 §10）。
+    靠换 method 拿到未经核验的高风险结论。
 
     Returns:
         `(answer, run_id)`；没有 ACTIVE 批次时 answer 为 None。
@@ -1231,7 +1229,7 @@ def _high_risk_unavailable(question, exc, *, method, retrieval=None, warnings=No
     """核验链路不可用时的**受控**回答：原文展示或拒答，绝不保留自由文本。
 
     拆改前这里会「保留原答案」，理由是用户不至于一无所获。但代价是把一段未经
-    核验的自由文本连同「高风险」一起返回给用户，正是本任务要消除的风险。
+    核验的自由文本连同「高风险」一起返回给用户，会绕过高风险核验。
     现在 `answer` 一律被**替换**为程序化文本：要么是明确标注「未经核验」的
     教材原文展示（来源为所选 method 的检索结果），要么是直接拒答。
 

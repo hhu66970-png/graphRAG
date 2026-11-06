@@ -177,7 +177,6 @@ def show_herb(store: Neo4jStore, run_id: str, herb: str) -> None:
 
 
 def main() -> int:
-    """命令行入口：解析参数并执行本脚本的主流程。"""
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Verify the v2 KG against legacy defects")
     parser.add_argument("--herb", default="人参", help="用于属性聚合演示的药名")
